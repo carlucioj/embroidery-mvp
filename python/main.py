@@ -69,6 +69,7 @@ def run_http_server_mode(host: str, port: int) -> None:
     async def process_image(
         image: UploadFile = File(...),
         max_colors: int = Form(default=8),
+        remove_background: bool = Form(default=True, alias="removeBackground"),
     ):
         """
         Remove background and reduce colors from an uploaded image.
@@ -80,6 +81,7 @@ def run_http_server_mode(host: str, port: int) -> None:
             result = processor.process_image(
                 image_bytes=image_bytes,
                 max_colors=max_colors,
+                remove_background=remove_background,
             )
             return Response(
                 content=result,
@@ -128,6 +130,9 @@ def run_http_server_mode(host: str, port: int) -> None:
                 "totalStitches": result["total_stitches"],
                 "colorChanges": result["color_changes"],
                 "estimatedMinutes": result["estimated_minutes"],
+                "colors": result["colors"],
+                "stitchPaths": result["stitch_paths"],
+                "colorChangesList": result["color_changes_list"],
             })
         except ValueError as e:
             return JSONResponse(

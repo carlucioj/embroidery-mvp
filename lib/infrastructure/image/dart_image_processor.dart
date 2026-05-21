@@ -97,11 +97,12 @@ class DartImageProcessor implements ImageProcessor {
 
     // ── Step 2: Color reduction ─────────────────────────────────────────
     _emitProgress(0.55, 'Simplificando cores...');
-    // FIX: assign the result back to pixels
-    pixels = await compute(
+    final reduceResult = await compute(
       _reduceColorsIsolate,
       _ReduceColorsParams(pixels, width, height, options.maxColors),
     );
+    pixels = reduceResult['pixels'] as Uint8List;
+    final dominantColors = (reduceResult['dominantColors'] as List).cast<int>();
 
     if (_cancelled) throw const ImageProcessingException('Cancelado.');
 
@@ -115,9 +116,9 @@ class DartImageProcessor implements ImageProcessor {
     return ProcessingResult(
       processedImage: ProcessedImage(
         bytes: resultBytes,
-        colorCount: options.maxColors,
+        colorCount: dominantColors.length,
         processingDurationMs: 0,
-        dominantColors: const [],
+        dominantColors: dominantColors,
       ),
       wasRemote: false,
     );
@@ -220,7 +221,8 @@ class _ReduceColorsParams {
 }
 
 /// K-means color quantization in pure Dart.
-Uint8List _reduceColorsIsolate(_ReduceColorsParams p) {
+/// Returns {'pixels': Uint8List, 'dominantColors': List<int>} (ARGB ints).
+Map<String, Object> _reduceColorsIsolate(_ReduceColorsParams p) {
   final pixels = Uint8List.fromList(p.pixels);
   final total = p.width * p.height;
   final k = math.min(p.maxColors, 32);
@@ -233,7 +235,7 @@ Uint8List _reduceColorsIsolate(_ReduceColorsParams p) {
     }
   }
 
-  if (visibleColors.isEmpty) return pixels;
+  if (visibleColors.isEmpty) return {'pixels': pixels, 'dominantColors': <int>[]};
 
   final step = math.max(1, visibleColors.length ~/ k);
   final centroids = List.generate(
@@ -295,7 +297,18 @@ Uint8List _reduceColorsIsolate(_ReduceColorsParams p) {
     pixels[base + 2] = centroids[nearest][2].round().clamp(0, 255);
   }
 
-  return pixels;
+  // Extract unique ARGB values from quantized pixels (= the centroid colors).
+  final seen = <int>{};
+  final dominantColors = <int>[];
+  for (int i = 0; i < total; i++) {
+    final base = i * 4;
+    if (pixels[base + 3] > 10) {
+      final argb = 0xFF000000 | (pixels[base] << 16) | (pixels[base + 1] << 8) | pixels[base + 2];
+      if (seen.add(argb)) dominantColors.add(argb);
+    }
+  }
+
+  return {'pixels': pixels, 'dominantColors': dominantColors};
 }
 
 List<int> _getPixel(Uint8List pixels, int x, int y, int width) {

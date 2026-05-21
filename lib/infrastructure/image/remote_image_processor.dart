@@ -75,6 +75,7 @@ class RemoteImageProcessor implements ImageProcessor {
         imageBytes: input.bytes,
         filename: input.filename,
         maxColors: options.maxColors,
+        removeBackground: options.removeBackground,
         onProgress: (p) => _emitProgress(0.1 + p * 0.8, 'Processando na nuvem...'),
       );
 

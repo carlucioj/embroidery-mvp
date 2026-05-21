@@ -91,6 +91,7 @@ async def process_image(
     request: Request,
     image: UploadFile = File(..., description="Image file (JPG, PNG, BMP, WEBP)"),
     max_colors: int = Form(default=8, ge=1, le=32, alias="maxColors"),
+    remove_background: bool = Form(default=True, alias="removeBackground"),
 ):
     """
     Remove background and reduce colors from an uploaded image.
@@ -104,6 +105,7 @@ async def process_image(
         result = _processor.process_image(
             image_bytes=image_bytes,
             max_colors=max_colors,
+            remove_background=remove_background,
         )
         return Response(content=result, media_type="image/png")
 
@@ -148,6 +150,9 @@ async def convert_embroidery(
             "totalStitches": result["total_stitches"],
             "colorChanges": result["color_changes"],
             "estimatedMinutes": result["estimated_minutes"],
+            "colors": result["colors"],
+            "stitchPaths": result["stitch_paths"],
+            "colorChangesList": result["color_changes_list"],
         })
 
     except ValueError as e:

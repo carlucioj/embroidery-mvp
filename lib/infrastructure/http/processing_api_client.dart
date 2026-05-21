@@ -34,12 +34,14 @@ class ProcessingApiClient {
     required Uint8List imageBytes,
     required String filename,
     int maxColors = ProcessingConfig.maxColors,
+    bool removeBackground = true,
     void Function(double progress)? onProgress,
   }) async {
     return _withRetry(() async {
       final uri = Uri.parse('$_baseUrl/process-image');
       final request = http.MultipartRequest('POST', uri)
         ..fields['maxColors'] = maxColors.toString()
+        ..fields['removeBackground'] = removeBackground.toString()
         ..files.add(
           http.MultipartFile.fromBytes(
             'image',
