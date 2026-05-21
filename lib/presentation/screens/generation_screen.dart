@@ -9,6 +9,7 @@ import '../../domain/models/embroidery_design.dart';
 import '../../domain/models/workflow_state.dart';
 import '../../infrastructure/embroidery/py_embroidery_converter.dart';
 import '../widgets/contextual_help_button.dart';
+import '../widgets/hoop_canvas.dart';
 
 /// Step 4: Embroidery generation and preview screen.
 ///
@@ -124,13 +125,37 @@ class _GenerationScreenState extends State<GenerationScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Preview area
-                _PreviewArea(
-                  design: _design,
-                  isGenerating: _isGenerating,
-                  selectedColorIndex: _selectedColorIndex,
-                  onColorTap: (i) => setState(() => _selectedColorIndex = i),
-                ),
+                // Hoop canvas — shows the bastidor ghost and stitch preview
+                if (state.parameters != null)
+                  SizedBox(
+                    height: 300,
+                    child: Stack(
+                      children: [
+                        HoopCanvas(
+                          parameters: state.parameters!,
+                          design: _design,
+                          selectedColorIndex: _selectedColorIndex,
+                          onSizeChanged: (w, h) {
+                            // Update parameters in BLoC when user resizes design
+                            final updated = state.parameters!.copyWith(
+                              designWidthMm: w,
+                              designHeightMm: h,
+                            );
+                            context
+                                .read<WorkflowBloc>()
+                                .add(WorkflowParametersSet(updated));
+                          },
+                        ),
+                        if (_isGenerating)
+                          const Positioned.fill(
+                            child: ColoredBox(
+                              color: Color(0x66000000),
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
 
                 const SizedBox(height: 16),
 
@@ -235,179 +260,6 @@ class _StepHeader extends StatelessWidget {
   }
 }
 
-class _PreviewArea extends StatelessWidget {
-  const _PreviewArea({
-    required this.design,
-    required this.isGenerating,
-    required this.selectedColorIndex,
-    required this.onColorTap,
-  });
-
-  final EmbroideryDesign? design;
-  final bool isGenerating;
-  final int? selectedColorIndex;
-  final ValueChanged<int> onColorTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      height: 280,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: isGenerating
-            ? const Center(child: CircularProgressIndicator())
-            : design == null
-                ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.preview_outlined,
-                        size: 64,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Clique em "Gerar Bordado" para ver a prévia',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  )
-                : _StitchPreviewCanvas(
-                    design: design!,
-                    selectedColorIndex: selectedColorIndex,
-                    onColorTap: onColorTap,
-                  ),
-      ),
-    );
-  }
-}
-
-/// Simple canvas that renders stitch paths as colored lines.
-class _StitchPreviewCanvas extends StatelessWidget {
-  const _StitchPreviewCanvas({
-    required this.design,
-    required this.selectedColorIndex,
-    required this.onColorTap,
-  });
-
-  final EmbroideryDesign design;
-  final int? selectedColorIndex;
-  final ValueChanged<int> onColorTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapUp: (details) {
-        // Cycle through colors on tap
-        if (design.colors.isEmpty) return;
-        final next = ((selectedColorIndex ?? -1) + 1) % design.colors.length;
-        onColorTap(next);
-      },
-      child: CustomPaint(
-        painter: _StitchPainter(
-          design: design,
-          selectedColorIndex: selectedColorIndex,
-        ),
-        child: const SizedBox.expand(),
-      ),
-    );
-  }
-}
-
-class _StitchPainter extends CustomPainter {
-  const _StitchPainter({required this.design, this.selectedColorIndex});
-
-  final EmbroideryDesign design;
-  final int? selectedColorIndex;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (design.stitchPaths.isEmpty) {
-      // Draw placeholder grid
-      final paint = Paint()
-        ..color = Colors.grey.withValues(alpha: 0.3)
-        ..strokeWidth = 1;
-      for (double x = 0; x < size.width; x += 20) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-      }
-      for (double y = 0; y < size.height; y += 20) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-      }
-      return;
-    }
-
-    // Find bounding box of all points
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-
-    for (final path in design.stitchPaths) {
-      for (int i = 0; i < path.points.length - 1; i += 2) {
-        final x = path.points[i];
-        final y = path.points[i + 1];
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-
-    final rangeX = maxX - minX;
-    final rangeY = maxY - minY;
-    if (rangeX == 0 || rangeY == 0) return;
-
-    final scaleX = (size.width - 32) / rangeX;
-    final scaleY = (size.height - 32) / rangeY;
-    final scale = scaleX < scaleY ? scaleX : scaleY;
-    final offsetX = (size.width - rangeX * scale) / 2;
-    final offsetY = (size.height - rangeY * scale) / 2;
-
-    for (final stitchPath in design.stitchPaths) {
-      final colorIndex = stitchPath.colorIndex;
-      final isSelected = selectedColorIndex == colorIndex;
-      final color = colorIndex < design.colors.length
-          ? Color(design.colors[colorIndex].argb | 0xFF000000)
-          : Colors.grey;
-
-      final paint = Paint()
-        ..color = isSelected ? color : color.withValues(alpha: 0.5)
-        ..strokeWidth = isSelected ? 2.0 : 1.0
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-
-      final points = stitchPath.points;
-      if (points.length < 4) continue;
-
-      final path = Path();
-      path.moveTo(
-        (points[0] - minX) * scale + offsetX,
-        (points[1] - minY) * scale + offsetY,
-      );
-
-      for (int i = 2; i < points.length - 1; i += 2) {
-        path.lineTo(
-          (points[i] - minX) * scale + offsetX,
-          (points[i + 1] - minY) * scale + offsetY,
-        );
-      }
-
-      canvas.drawPath(path, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_StitchPainter old) =>
-      old.design != design || old.selectedColorIndex != selectedColorIndex;
-}
 
 class _MetricsCard extends StatelessWidget {
   const _MetricsCard({required this.design});
