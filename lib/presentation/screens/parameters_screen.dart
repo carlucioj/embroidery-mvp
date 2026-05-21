@@ -8,6 +8,7 @@ import '../../core/constants.dart';
 import '../../domain/models/embroidery_parameters.dart';
 import '../../domain/models/workflow_state.dart';
 import '../widgets/contextual_help_button.dart';
+import '../widgets/hoop_canvas.dart';
 
 /// Step 3: Embroidery parameters screen.
 ///
@@ -238,6 +239,41 @@ class _ParametersScreenState extends State<ParametersScreen> {
                   setState(() => _maintainAspectRatio = !_maintainAspectRatio),
               onFitToHoop: _fitToHoop,
             ),
+
+            const SizedBox(height: 20),
+
+            // ── Hoop preview canvas ─────────────────────────────────────
+            if (_selectedHoop != null) ...[
+              const _SectionLabel(label: 'Prévia do Bastidor'),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 220,
+                child: HoopCanvas(
+                  parameters: EmbroideryParameters(
+                    hoop: _selectedHoop!,
+                    fabric: _selectedFabric ?? FabricTypes.cotton,
+                    designWidthMm: double.tryParse(_widthController.text) ?? 100,
+                    designHeightMm: double.tryParse(_heightController.text) ?? 100,
+                    outputFormat: _selectedFormat ?? OutputFormats.all.first,
+                    maintainAspectRatio: _maintainAspectRatio,
+                  ),
+                  onSizeChanged: (w, h) {
+                    setState(() {
+                      _widthController.text = w.toStringAsFixed(1);
+                      _heightController.text = h.toStringAsFixed(1);
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Arraste o design ou use as alças para redimensionar.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ],
 
             const SizedBox(height: 20),
 
