@@ -5,16 +5,26 @@ import '../../domain/models/embroidery_design.dart';
 import '../../domain/models/embroidery_parameters.dart';
 import '../../domain/models/image_data.dart';
 import '../../domain/models/workflow_state.dart';
+import 'workflow_persistence.dart';
+import 'workflow_state_data.dart';
+
+// Re-export so all consumers of workflow_bloc.dart get WorkflowBlocState
+// without needing a separate import.
+export 'workflow_state_data.dart';
 
 part 'workflow_event.dart';
-part 'workflow_state_data.dart';
 
 /// BLoC that manages the embroidery workflow state machine.
 ///
-/// Enforces linear progression through workflow steps and
-/// preserves state when navigating backwards.
+/// Enforces linear progression through workflow steps and preserves state
+/// when navigating backwards. All state changes are persisted to disk via
+/// [WorkflowPersistence] so sessions survive app restarts.
 class WorkflowBloc extends Bloc<WorkflowEvent, WorkflowBlocState> {
-  WorkflowBloc() : super(const WorkflowBlocState.initial()) {
+  WorkflowBloc({
+    WorkflowBlocState? initialState,
+    WorkflowPersistence? persistence,
+  })  : _persistence = persistence ?? WorkflowPersistence(),
+        super(initialState ?? const WorkflowBlocState.initial()) {
     on<WorkflowAdvanceRequested>(_onAdvanceRequested);
     on<WorkflowGoBackRequested>(_onGoBackRequested);
     on<WorkflowImageCaptured>(_onImageCaptured);
@@ -24,6 +34,15 @@ class WorkflowBloc extends Bloc<WorkflowEvent, WorkflowBlocState> {
     on<WorkflowExportCompleted>(_onExportCompleted);
     on<WorkflowReset>(_onReset);
     on<WorkflowOnboardingCompleted>(_onOnboardingCompleted);
+  }
+
+  final WorkflowPersistence _persistence;
+
+  @override
+  void onChange(Change<WorkflowBlocState> change) {
+    super.onChange(change);
+    // Debounced fire-and-forget: keeps session in sync without blocking UI
+    _persistence.scheduleSave(change.nextState);
   }
 
   void _onAdvanceRequested(
@@ -120,6 +139,8 @@ class WorkflowBloc extends Bloc<WorkflowEvent, WorkflowBlocState> {
     Emitter<WorkflowBlocState> emit,
   ) {
     emit(const WorkflowBlocState.initial());
+    // Clear persisted session immediately (no debounce — we want instant wipe)
+    _persistence.clearWorkflowState().catchError((_) {});
   }
 
   void _onOnboardingCompleted(

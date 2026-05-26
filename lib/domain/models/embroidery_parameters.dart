@@ -176,6 +176,45 @@ class EmbroideryParameters {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'hoopId': hoop.id,
+        'fabricId': fabric.id,
+        'designWidthMm': designWidthMm,
+        'designHeightMm': designHeightMm,
+        'outputFormat': outputFormat.extension,
+        'stitchType': stitchType.id,
+        'maintainAspectRatio': maintainAspectRatio,
+      };
+
+  factory EmbroideryParameters.fromJson(Map<String, dynamic> json) {
+    final hoopId = json['hoopId'] as String;
+    final fabricId = json['fabricId'] as String;
+    final formatExt = json['outputFormat'] as String;
+    final stitchTypeId = json['stitchType'] as String? ?? 'fill';
+
+    return EmbroideryParameters(
+      hoop: HoopSizes.all.firstWhere(
+        (h) => h.id == hoopId,
+        orElse: () => HoopSizes.rectangular.first,
+      ),
+      fabric: FabricTypes.all.firstWhere(
+        (f) => f.id == fabricId,
+        orElse: () => FabricTypes.cotton,
+      ),
+      designWidthMm: (json['designWidthMm'] as num).toDouble(),
+      designHeightMm: (json['designHeightMm'] as num).toDouble(),
+      outputFormat: OutputFormats.all.firstWhere(
+        (f) => f.extension == formatExt,
+        orElse: () => OutputFormats.all.first,
+      ),
+      stitchType: StitchType.values.firstWhere(
+        (s) => s.id == stitchTypeId,
+        orElse: () => StitchType.fill,
+      ),
+      maintainAspectRatio: json['maintainAspectRatio'] as bool? ?? true,
+    );
+  }
+
   @override
   String toString() =>
       'EmbroideryParameters(hoop: ${hoop.label}, fabric: ${fabric.label}, '

@@ -21,6 +21,13 @@ class PrefsKeys {
   static const String lastHoopSize = 'last_hoop_size';
   static const String workflowState = 'workflow_state';
   static const String pendingFeedback = 'pending_feedback';
+
+  // Session persistence keys
+  static const String workflowHasSession = 'workflow_has_session';
+  static const String workflowCurrentStep = 'workflow_step';
+  static const String workflowCapturedMeta = 'workflow_captured_meta';
+  static const String workflowCleanedMeta = 'workflow_cleaned_meta';
+  static const String workflowParameters = 'workflow_parameters';
 }
 
 /// Supported image formats for import

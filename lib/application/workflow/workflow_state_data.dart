@@ -1,4 +1,9 @@
-part of 'workflow_bloc.dart';
+import 'package:equatable/equatable.dart';
+
+import '../../domain/models/embroidery_design.dart';
+import '../../domain/models/embroidery_parameters.dart';
+import '../../domain/models/image_data.dart';
+import '../../domain/models/workflow_state.dart';
 
 /// Immutable state for the workflow BLoC.
 ///
