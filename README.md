@@ -1,167 +1,230 @@
 # Embroidery MVP
 
-Aplicação multiplataforma Flutter que converte imagens em arquivos de bordado compatíveis com máquinas industriais e domésticas.
+> **Converta qualquer imagem em arquivo de bordado — sem pagar R$1.500 em software proprietário.**
 
-## Visão Geral
+Aplicação Flutter multiplataforma que transforma fotos e ilustrações em arquivos de bordado compatíveis com as principais máquinas do mercado (Brother, Tajima, Janome, Singer e outras 8 marcas), com validação automática antes da exportação para garantir que o arquivo funcione na máquina.
 
-O Embroidery MVP guia o artesão passo a passo em cinco etapas:
+---
 
-1. **Importar Imagem** — Captura de foto (Mobile) ou importação de arquivo (Desktop)
-2. **Limpar Arte** — Remoção automática de fundo e redução de cores
-3. **Parâmetros** — Seleção de bastidor, tecido, tamanho e formato de saída
-4. **Gerar Bordado** — Conversão para caminhos de pontos com pré-visualização
-5. **Exportar** — Salvar arquivo de bordado no pendrive ou dispositivo
+## Por que esse app existe
 
-## Plataformas Suportadas
+Software profissional de digitização de bordado (PE-Design Next, Hatch Embroidery, Wilcom) custa entre **R$1.200 e R$5.000** e roda apenas no Windows. Para quem tem uma máquina Brother em casa ou num pequeno ateliê e quer bordar uma foto de família, um logotipo ou uma arte personalizada, a única alternativa acessível hoje é pagar por uma conversão online de qualidade duvidosa ou aprender uma ferramenta industrial complexa.
 
-| Plataforma | Status |
-|------------|--------|
-| Windows Desktop | ✅ Suportado |
-| Android | ✅ Suportado |
-| iOS | ✅ Suportado |
+Este projeto é a alternativa: **gratuita, open-source, guiada por IA, e que funciona no celular**.
+
+---
+
+## Demonstração do fluxo
+
+```
+📷 Importar Imagem
+        ↓
+🎨 Limpar Arte (IA remove fundo, escolha de refinamento)
+        ↓
+📐 Parâmetros (bastidor, tecido, tamanho, tipo de ponto)
+        ↓
+🪡 Gerar Bordado (tatami fill + preview interativo)
+        ↓
+✅ Validar + Exportar (.PES, .DST, .JEF e mais 9 formatos)
+```
+
+---
+
+## Funcionalidades
+
+### Processamento de imagem com IA
+- Remoção de fundo automática via **U2Net** (rembg) — sem fundo branco residual
+- Redução de cores por **K-means clustering** — mantém fidelidade às cores reais
+- **Análise de complexidade** antes de decidir o nível de processamento:
+  - Score 0–135 com três níveis: Simples / Moderado / Complexo
+  - Métricas: cores únicas, densidade de bordas, regiões conectadas
+- **Refinamento por escolha do usuário** — sem surpresas:
+  - *Sem refinamento* — resultado básico, rápido
+  - *Refinamento Leve* — kernel 3×3, remove ruído sem apagar traços finos (ideal para arte em chalk, stickers)
+  - *Refinamento Intenso* — kernel 5×5 + simplificação de polígonos (ideal para fotos)
+
+### Geração de pontos profissional
+- **Tatami fill diagonal** (45°, boustrophedon) — padrão industrial, sem listras
+- **Contorno em ponto de corrida** por região de cor
+- **Satim horizontal** para formas estreitas e letras
+- Preview interativo dos caminhos de ponto no canvas do bastidor
+
+### Exportação com validação
+Antes de salvar, o app valida automaticamente o arquivo contra as especificações das máquinas:
+
+| Verificação | Tipo | Detalhe |
+|-------------|------|---------|
+| Nenhuma cor encontrada | Erro | Bloqueia exportação |
+| Mais de 64 cores | Erro | Bloqueia exportação |
+| Mais de 16 cores | Aviso | Máquinas Brother consumer suportam até 16 |
+| Nenhum ponto gerado | Erro | Bloqueia exportação |
+| Mais de 500K pontos | Aviso | Pode exceder limite de algumas máquinas |
+| Cabeçalho `.PES` inválido (`#PES`) | Erro | Bloqueia exportação |
+
+### 12 formatos de saída
+| Formato | Fabricante / Compatibilidade |
+|---------|------------------------------|
+| `.PES` | **Brother, Babylock** — validado contra magic bytes `#PES` |
+| `.DST` | **Tajima** — padrão industrial mundial |
+| `.JEF` | **Janome** |
+| `.EXP` | **Melco, Bernina** |
+| `.HUS` | **Husqvarna Viking** |
+| `.VIP` | **Husqvarna Viking, Pfaff** |
+| `.VP3` | **Husqvarna Viking, Pfaff** |
+| `.XXX` | **Singer** |
+| `.SEW` | **Elna, Janome** |
+| `.CSD` | **Poem, Singer, Husqvarna** |
+| `.EMB` | **Wilcom** |
+| `.OFM` | **Barudan** |
+
+---
+
+## Plataformas
+
+| Plataforma | Status | Método de processamento |
+|------------|--------|------------------------|
+| **Windows Desktop** | ✅ Suportado | Python local via MethodChannel |
+| **Android** | ✅ Suportado | HTTP REST API (servidor local ou nuvem) |
+| **iOS** | ✅ Suportado | HTTP REST API (servidor local ou nuvem) |
+
+---
 
 ## Requisitos
 
-### Desktop (Windows)
+### Desktop (Windows) — recomendado
 - Windows 10 64-bit ou superior
-- 8 GB RAM (mínimo)
-- Processador Intel Core i3 8ª geração ou equivalente
+- 4 GB RAM (mínimo), 8 GB RAM (recomendado para rembg)
 - Flutter 3.16+
 - Python 3.11+
 
-### Mobile (Android/iOS)
+### Mobile
 - Android 8.0+ / iOS 13+
-- 2 GB RAM (para processamento local)
+- Servidor Python rodando em rede local ou VPS
+
+---
 
 ## Instalação e Execução
 
-### 1. Instalar Flutter
+### 1. Clonar o repositório
 
-Siga as instruções em [flutter.dev/docs/get-started/install](https://flutter.dev/docs/get-started/install).
-
-Verifique a instalação:
 ```bash
-flutter doctor
+git clone https://github.com/carlucioj/embroidery-mvp.git
+cd embroidery-mvp/embroidery_mvp
 ```
 
 ### 2. Instalar dependências Flutter
 
 ```bash
-cd embroidery_mvp
 flutter pub get
 ```
 
-### 3. Instalar dependências Python
+### 3. Configurar backend Python
 
-```bash
+```powershell
 cd python
-pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install rembg opencv-python-headless pyembroidery Pillow numpy fastapi uvicorn
 ```
 
-### 4. Executar o app
+### 4. Iniciar o servidor Python
 
-**Desktop (Windows):**
+**Windows (Desktop):**
+```powershell
+python main.py
+```
+
+Ou use o script de atalho:
+```
+INICIAR_SERVIDOR.bat
+```
+
+### 5. Rodar o app
+
 ```bash
+# Desktop
 flutter run -d windows
-```
 
-**Android:**
-```bash
+# Android
 flutter run -d android
 ```
 
-**iOS:**
+---
+
+## Testes
+
+### Flutter
 ```bash
-flutter run -d ios
+flutter test                  # todos os testes
+flutter test test/domain/     # somente domínio
+flutter test test/application/ # somente BLoC
 ```
 
-## Estrutura do Projeto
-
-```
-embroidery_mvp/
-├── lib/
-│   ├── main.dart                    # Entry point
-│   ├── app.dart                     # Root widget
-│   ├── core/
-│   │   ├── theme.dart               # Tema visual (cores, tipografia)
-│   │   ├── constants.dart           # Constantes do app
-│   │   └── app_router.dart          # Roteamento
-│   ├── domain/
-│   │   ├── models/                  # Modelos de dados
-│   │   │   ├── workflow_state.dart  # Estados do fluxo
-│   │   │   ├── image_data.dart      # Dados de imagem
-│   │   │   ├── embroidery_parameters.dart
-│   │   │   └── embroidery_design.dart
-│   │   └── interfaces/              # Interfaces abstratas
-│   │       ├── image_processor.dart
-│   │       ├── embroidery_converter.dart
-│   │       └── export_manager.dart
-│   ├── application/
-│   │   └── workflow/                # BLoC de workflow
-│   │       ├── workflow_bloc.dart
-│   │       ├── workflow_event.dart
-│   │       └── workflow_state_data.dart
-│   ├── infrastructure/
-│   │   ├── python/                  # Comunicação com Python (Desktop)
-│   │   │   └── python_bridge.dart
-│   │   └── http/                    # Cliente HTTP (Mobile)
-│   │       └── processing_api_client.dart
-│   └── presentation/
-│       └── screens/                 # Telas do app
-├── test/
-│   ├── domain/                      # Testes de domínio
-│   ├── application/                 # Testes de BLoC
-│   ├── infrastructure/              # Testes de integração
-│   └── presentation/                # Testes de widget
-└── python/
-    ├── requirements.txt             # Dependências Python
-    ├── main.py                      # Entry point Python
-    ├── image_processor.py           # Processamento de imagem
-    ├── embroidery_converter.py      # Conversão para bordado
-    └── method_channel_handler.py    # Handler MethodChannel
-```
-
-## Formatos de Saída Suportados
-
-| Formato | Fabricante |
-|---------|------------|
-| `.DST`  | Tajima |
-| `.PES`  | Brother / Babylock |
-| `.JEF`  | Janome |
-| `.EXP`  | Melco / Bernina |
-| `.HUS`  | Husqvarna Viking |
-| `.VIP`  | Husqvarna Viking / Pfaff |
-| `.VP3`  | Husqvarna Viking / Pfaff |
-| `.XXX`  | Singer |
-| `.SEW`  | Elna / Janome |
-| `.CSD`  | Poem / Singer / Husqvarna |
-| `.EMB`  | Wilcom |
-| `.OFM`  | Barudan |
-
-## Executar Testes
-
+### Python
 ```bash
-# Todos os testes
-flutter test
-
-# Testes específicos
-flutter test test/domain/
-flutter test test/application/
+cd python
+pytest test_image_processor.py -v
 ```
+
+---
 
 ## Arquitetura
 
-O app segue uma arquitetura em camadas:
+Clean Architecture em 4 camadas:
 
-- **Apresentação** (`lib/presentation/`) — Telas e widgets Flutter
-- **Aplicação** (`lib/application/`) — BLoCs e controllers
-- **Domínio** (`lib/domain/`) — Modelos e interfaces
-- **Infraestrutura** (`lib/infrastructure/`) — Implementações concretas
+```
+lib/
+├── domain/          # Modelos e interfaces (regras de negócio)
+├── application/     # BLoC (workflow_bloc.dart) — máquina de 6 estados
+├── infrastructure/  # Implementações (Python bridge, HTTP, export)
+└── presentation/    # Screens + widgets Flutter
+```
 
-O processamento de imagem é delegado ao backend Python:
-- **Desktop**: via MethodChannel (Python local)
-- **Mobile**: via HTTP REST API (servidor remoto) com fallback local
+```
+python/
+├── image_processor.py        # rembg + K-means + análise de complexidade
+├── embroidery_converter.py   # tatami fill + validação de saída
+├── api_server.py             # FastAPI REST (uso Mobile)
+├── method_channel_handler.py # Protocolo JSON via stdin/stdout (Desktop)
+└── main.py                   # Entry point
+```
+
+**Comunicação Python:**
+- Desktop → MethodChannel (processo Python local, latência ~0ms)
+- Mobile → HTTP REST API (FastAPI, pode rodar em VPS)
+- Fallback → Dart puro (processamento simplificado sem rembg)
+
+---
+
+## Roadmap
+
+| Prioridade | Feature | Status |
+|-----------|---------|--------|
+| 1 | Canvas interativo com bastidor | ✅ Feito |
+| 2 | Preview real dos pontos de bordado | ✅ Feito |
+| 3 | Conversão com remoção de fundo por IA | ✅ Feito |
+| 4 | Tatami fill diagonal + outline (qualidade industrial) | ✅ Feito |
+| 5 | Tipos de ponto editáveis (fill / outline / satin) | ✅ Feito |
+| 6 | Análise de complexidade + refinamento por escolha | ✅ Feito |
+| 7 | Exportação `.PES` validada contra specs Brother | ✅ Feito |
+| 8 | Geração via IA (Claude API) | 🔜 Em planejamento |
+| 9 | Vectorização automática via vtracer | 🔜 Em planejamento |
+| 10 | Detecção de USB para exportação automática | 🔜 Em planejamento |
+
+---
 
 ## Contribuição
 
-Este projeto está em desenvolvimento ativo. Consulte o arquivo `.kiro/specs/embroidery-mvp/tasks.md` para ver as tarefas pendentes.
+Issues e PRs são bem-vindos. Use o fluxo Gitflow:
+
+- `main` — versão estável
+- `develop` — integração contínua
+- `feature/<nome>` — funcionalidades em desenvolvimento
+
+Veja o arquivo [SPRINT.md](SPRINT.md) para tarefas em andamento e [CLAUDE.md](CLAUDE.md) para convenções do projeto.
+
+---
+
+## Licença
+
+MIT — use, modifique e distribua livremente.

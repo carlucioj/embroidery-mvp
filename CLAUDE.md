@@ -71,10 +71,10 @@ lib/
 
 ## Bugs conhecidos (NÃO introduzir regressões)
 
-1. **ColorMapper race condition** — `loadColorTables()` sem sincronização; se chamar duas vezes simultâneas pode crashar. Usar `Completer` como lock.
-2. **Preview não implementado** — `GenerationScreen` não renderiza pontos; `generatePreview()` retorna bytes brutos. A estrutura `StitchPath` existe, falta o `CustomPainter`.
+1. ~~ColorMapper race condition~~ — **CORRIGIDO** (`Completer` lock em `color_mapper.dart`).
+2. ~~Preview não implementado~~ — **CORRIGIDO** (`HoopCanvas._paintStitchPaths` + `GenerationScreen` já conectados).
 3. **Feedback sem backend** — UI coleta dados mas nunca envia. `TODO` em `adaptive_scaffold.dart:278`.
-4. **Geração scanline simples** — Python usa scan de linhas horizontais; resultado é "listrado". Melhorar com contorno + fill mais sofisticado.
+4. ~~Geração scanline simples~~ — **CORRIGIDO** (tatami fill diagonal + outline via `cv2.findContours` em `embroidery_converter.py`). Resize usa `Image.NEAREST` para preservar cores quantizadas.
 5. **Estado não persiste** — fechar o app apaga o workflow. `workflow_persistence.dart` só salva prefs leves.
 
 ## Convenções de código
@@ -95,9 +95,10 @@ Usados pelo `ColorMapper` para mapear cores ARGB para códigos de linha via dist
 
 ## Prioridades de implementação
 
-1. Canvas interativo com bastidor (`CustomPainter` + `GestureDetector`)
-2. Preview real dos pontos de bordado na tela de geração
-3. Conversão de imagem com seleção manual de remoção de fundo
-4. Tipos de ponto editáveis (satim, preenchimento, contorno)
-5. Exportação .PES validada contra specs Brother
-6. Geração via IA (Claude API) — fase futura
+1. ~~Canvas interativo com bastidor~~ — FEITO
+2. ~~Preview real dos pontos de bordado~~ — FEITO
+3. ~~Conversão de imagem com seleção manual de remoção de fundo~~ — FEITO
+4. ~~Algoritmo de fill tatami + outline (qualidade de máquina)~~ — FEITO
+5. ~~Tipos de ponto editáveis~~ — FEITO (`StitchType` enum, seletor na ParametersScreen, 3 modos: fill/outline/satin)
+6. **Exportação .PES validada** contra specs Brother — próximo
+7. Geração via IA (Claude API) — fase futura
