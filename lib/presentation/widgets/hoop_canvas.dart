@@ -62,18 +62,26 @@ class _HoopCanvasState extends State<HoopCanvas> {
   @override
   void didUpdateWidget(HoopCanvas old) {
     super.didUpdateWidget(old);
-    if (old.parameters.hoop != widget.parameters.hoop) {
+    final p = widget.parameters;
+    final op = old.parameters;
+    // Re-sync whenever hoop or design dimensions change from outside (text fields)
+    if (op.hoop != p.hoop ||
+        op.designWidthMm != p.designWidthMm ||
+        op.designHeightMm != p.designHeightMm) {
       _syncFromParameters();
     }
   }
 
   void _syncFromParameters() {
-    _designWidthMm = widget.parameters.designWidthMm;
-    _designHeightMm = widget.parameters.designHeightMm;
     final hoop = widget.parameters.hoop;
+    // Clamp so the design never overflows the hoop (avoids handles drawing outside canvas)
+    _designWidthMm = widget.parameters.designWidthMm
+        .clamp(_minDesignMm, hoop.widthMm.toDouble());
+    _designHeightMm = widget.parameters.designHeightMm
+        .clamp(_minDesignMm, hoop.heightMm.toDouble());
     _designOffsetMm = Offset(
-      ((hoop.widthMm - _designWidthMm) / 2).clamp(0, hoop.widthMm),
-      ((hoop.heightMm - _designHeightMm) / 2).clamp(0, hoop.heightMm),
+      ((hoop.widthMm - _designWidthMm) / 2).clamp(0.0, hoop.widthMm.toDouble()),
+      ((hoop.heightMm - _designHeightMm) / 2).clamp(0.0, hoop.heightMm.toDouble()),
     );
   }
 
