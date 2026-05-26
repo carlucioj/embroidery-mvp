@@ -71,11 +71,12 @@ class RemoteImageProcessor implements ImageProcessor {
     try {
       _emitProgress(0.1, 'Enviando imagem para processamento na nuvem...');
 
-      final processedBytes = await _apiClient.processImage(
+      final result = await _apiClient.processImage(
         imageBytes: input.bytes,
         filename: input.filename,
         maxColors: options.maxColors,
         removeBackground: options.removeBackground,
+        mode: options.refinementMode.apiMode,
         onProgress: (p) => _emitProgress(0.1 + p * 0.8, 'Processando na nuvem...'),
       );
 
@@ -84,10 +85,11 @@ class RemoteImageProcessor implements ImageProcessor {
       _emitProgress(0.95, 'Finalizando...');
 
       final processedImage = ProcessedImage(
-        bytes: processedBytes,
+        bytes: result.imageBytes,
         colorCount: options.maxColors,
         processingDurationMs: 0,
-        dominantColors: const [],
+        dominantColors: result.dominantColors,
+        complexity: result.complexity,
       );
 
       _emitProgress(1.0, 'Concluído!');

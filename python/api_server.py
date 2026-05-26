@@ -92,11 +92,13 @@ async def process_image(
     image: UploadFile = File(..., description="Image file (JPG, PNG, BMP, WEBP)"),
     max_colors: int = Form(default=8, ge=1, le=32, alias="maxColors"),
     remove_background: bool = Form(default=True, alias="removeBackground"),
+    mode: str = Form(default="basic"),
 ):
     """
     Remove background and reduce colors from an uploaded image.
 
-    Returns the processed image as PNG bytes.
+    Returns JSON with imageBase64, dominantColors, and complexity analysis.
+    mode: "basic" (fast) or "advanced" (morphological cleanup + simplification).
     """
     _check_auth(request)
 
@@ -106,8 +108,13 @@ async def process_image(
             image_bytes=image_bytes,
             max_colors=max_colors,
             remove_background=remove_background,
+            mode=mode,
         )
-        return Response(content=result, media_type="image/png")
+        return JSONResponse(content={
+            "imageBase64": base64.b64encode(result["image_bytes"]).decode(),
+            "dominantColors": result["dominant_colors"],
+            "complexity": result["complexity"],
+        })
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -127,6 +134,7 @@ async def convert_embroidery(
     width_mm: float = Form(..., alias="widthMm", gt=0),
     height_mm: float = Form(..., alias="heightMm", gt=0),
     fabric_id: str = Form(..., alias="fabricId"),
+    stitch_type: str = Form(default="fill", alias="stitchType"),
 ):
     """
     Convert a processed image to an embroidery file.
@@ -144,6 +152,7 @@ async def convert_embroidery(
             width_mm=width_mm,
             height_mm=height_mm,
             fabric_id=fabric_id,
+            stitch_type=stitch_type,
         )
         return JSONResponse(content={
             "fileBytes": base64.b64encode(result["file_bytes"]).decode(),
@@ -153,6 +162,7 @@ async def convert_embroidery(
             "colors": result["colors"],
             "stitchPaths": result["stitch_paths"],
             "colorChangesList": result["color_changes_list"],
+            "validation": result["validation"],
         })
 
     except ValueError as e:

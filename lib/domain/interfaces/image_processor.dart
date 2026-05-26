@@ -12,6 +12,39 @@ enum ProcessingMode {
   auto,
 }
 
+/// Refinement intensity applied after color quantization.
+enum RefinementMode {
+  /// No cleanup — fastest, preserves all details including noise
+  none,
+
+  /// Light cleanup — 3×3 kernel only; removes pixel noise without erasing thin strokes.
+  /// Best for chalk art, line drawings, thin-stroke images.
+  light,
+
+  /// Full cleanup — 5×5 kernel + polygon simplification.
+  /// Best for photos with noisy backgrounds. May erase thin strokes.
+  advanced;
+
+  /// The string value sent to the Python API.
+  String get apiMode => switch (this) {
+        RefinementMode.none => 'basic',
+        RefinementMode.light => 'light',
+        RefinementMode.advanced => 'advanced',
+      };
+
+  String get label => switch (this) {
+        RefinementMode.none => 'Sem refinamento',
+        RefinementMode.light => 'Refinamento Leve',
+        RefinementMode.advanced => 'Refinamento Intenso',
+      };
+
+  String get hint => switch (this) {
+        RefinementMode.none => 'Sem limpeza adicional.',
+        RefinementMode.light => 'Remove ruído pequeno. Ideal para desenhos e traços finos.',
+        RefinementMode.advanced => 'Limpeza profunda + simplificação. Ideal para fotos.',
+      };
+}
+
 /// Image quality setting for processing
 enum ImageQuality {
   /// Faster processing, lower quality
@@ -31,6 +64,7 @@ class ProcessingOptions {
     this.maxColors = 8,
     this.quality = ImageQuality.standard,
     this.mode = ProcessingMode.auto,
+    this.refinementMode = RefinementMode.none,
   });
 
   /// Whether to remove the image background
@@ -44,6 +78,9 @@ class ProcessingOptions {
 
   /// Processing mode (local, remote, or auto)
   final ProcessingMode mode;
+
+  /// Cleanup intensity applied after color quantization
+  final RefinementMode refinementMode;
 
   static const ProcessingOptions defaults = ProcessingOptions();
 }
