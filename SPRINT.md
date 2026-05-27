@@ -63,10 +63,11 @@ complexidade (Simples / Moderada / Complexa). O usuário vê o resultado e decid
 
 ## BACKLOG
 
-- [ ] Persistência de estado (fechar app mantém workflow)
-- [ ] Vectorização via vtracer (SVG como caminho intermediário)
-- [ ] Geração via Claude API (fase futura)
+- [x] Persistência de estado — FEITO (PR #6, `WorkflowPersistence`)
+- [x] Feedback persistido localmente — FEITO (PR #7, `savePendingFeedback`)
+- [x] Vectorização via vtracer — FEITO (`_vectorize_outline` em `embroidery_converter.py`)
 - [ ] Detecção de USB para exportação automática
+- [ ] Geração via Claude API (fase futura)
 
 ---
 

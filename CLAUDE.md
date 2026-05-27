@@ -102,4 +102,5 @@ Usados pelo `ColorMapper` para mapear cores ARGB para códigos de linha via dist
 5. ~~Tipos de ponto editáveis~~ — FEITO (`StitchType` enum, seletor na ParametersScreen, 3 modos: fill/outline/satin)
 6. ~~Exportação .PES validada~~ — FEITO (`_validate_output` em Python; `ValidationSeverity`/`DesignValidation` em Dart; `_ValidationCard` na ExportScreen; botão desabilitado em caso de erro)
 7. ~~Persistência de sessão~~ — FEITO (sessão completa sobrevive reinicializações; PR #6)
-8. **Geração via IA (Claude API)** — próximo (text prompt → embroidery design; maior diferencial competitivo)
+8. ~~Vectorização via vtracer~~ — FEITO (`_vectorize_outline()` em `embroidery_converter.py`; vtracer polygon mode → contornos suaves; fallback automático para cv2.findContours se não instalado)
+9. **Geração via IA (Claude API)** — próximo (text prompt → embroidery design; maior diferencial competitivo)
