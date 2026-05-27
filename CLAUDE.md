@@ -75,7 +75,7 @@ lib/
 2. ~~Preview não implementado~~ — **CORRIGIDO** (`HoopCanvas._paintStitchPaths` + `GenerationScreen` já conectados).
 3. **Feedback sem backend** — UI coleta dados mas nunca envia. `TODO` em `adaptive_scaffold.dart:278`.
 4. ~~Geração scanline simples~~ — **CORRIGIDO** (tatami fill diagonal + outline via `cv2.findContours` em `embroidery_converter.py`). Resize usa `Image.NEAREST` para preservar cores quantizadas.
-5. **Estado não persiste** — fechar o app apaga o workflow. `workflow_persistence.dart` só salva prefs leves.
+5. ~~Estado não persiste~~ — **CORRIGIDO** (`WorkflowPersistence` salva sessão completa: bytes em `embroidery_session/`, metadados em SharedPreferences; debounce 500ms; restaurado no startup via `main.dart`).
 
 ## Convenções de código
 
@@ -100,5 +100,6 @@ Usados pelo `ColorMapper` para mapear cores ARGB para códigos de linha via dist
 3. ~~Conversão de imagem com seleção manual de remoção de fundo~~ — FEITO
 4. ~~Algoritmo de fill tatami + outline (qualidade de máquina)~~ — FEITO
 5. ~~Tipos de ponto editáveis~~ — FEITO (`StitchType` enum, seletor na ParametersScreen, 3 modos: fill/outline/satin)
-6. **Exportação .PES validada** contra specs Brother — próximo
-7. Geração via IA (Claude API) — fase futura
+6. ~~Exportação .PES validada~~ — FEITO (`_validate_output` em Python; `ValidationSeverity`/`DesignValidation` em Dart; `_ValidationCard` na ExportScreen; botão desabilitado em caso de erro)
+7. ~~Persistência de sessão~~ — FEITO (sessão completa sobrevive reinicializações; PR #6)
+8. **Geração via IA (Claude API)** — próximo (text prompt → embroidery design; maior diferencial competitivo)

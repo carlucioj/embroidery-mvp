@@ -12,7 +12,9 @@ class StitchPath {
   factory StitchPath.fromJson(Map<String, dynamic> json) => StitchPath(
         colorIndex: json['colorIndex'] as int,
         stitchCount: json['stitchCount'] as int,
-        points: (json['points'] as List).cast<double>(),
+        points: (json['points'] as List)
+            .map((v) => (v as num).toDouble())
+            .toList(),
       );
 
   /// Index into the design's color list

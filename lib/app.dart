@@ -8,14 +8,21 @@ import 'core/theme.dart';
 
 /// Root widget of the Embroidery MVP application.
 class EmbroideryApp extends StatelessWidget {
-  const EmbroideryApp({required this.prefs, super.key});
+  const EmbroideryApp({
+    required this.prefs,
+    this.initialWorkflowState,
+    super.key,
+  });
 
   final SharedPreferences prefs;
+
+  /// Pre-loaded workflow state restored from disk (null → fresh session).
+  final WorkflowBlocState? initialWorkflowState;
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => WorkflowBloc(),
+      create: (_) => WorkflowBloc(initialState: initialWorkflowState),
       child: MaterialApp.router(
         title: 'Embroidery MVP',
         debugShowCheckedModeBanner: false,

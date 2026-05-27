@@ -45,6 +45,15 @@ class ImageComplexity {
         ComplexityLevel.complex => 'Complexa',
       };
 
+  Map<String, dynamic> toJson() => {
+        'level': level.name,
+        'score': score,
+        'unique_colors': uniqueColors,
+        'edge_density': edgeDensity,
+        'region_count': regionCount,
+        'avg_region_area_px': avgRegionAreaPx,
+      };
+
   String get recommendation => switch (level) {
         ComplexityLevel.simple => 'Boa para bordado direto.',
         ComplexityLevel.medium => 'Refinamento pode melhorar o resultado.',
@@ -113,6 +122,15 @@ class ImageData {
     );
   }
 
+  /// Serializes metadata only (bytes are stored separately as a file).
+  Map<String, dynamic> toJson() => {
+        'filename': filename,
+        'extension': extension,
+        'sizeBytes': sizeBytes,
+        if (widthPx != null) 'widthPx': widthPx,
+        if (heightPx != null) 'heightPx': heightPx,
+      };
+
   @override
   String toString() =>
       'ImageData(filename: $filename, size: ${sizeMB.toStringAsFixed(2)} MB, '
@@ -143,6 +161,14 @@ class ProcessedImage {
 
   /// Complexity analysis from the Python backend (null if not available)
   final ImageComplexity? complexity;
+
+  /// Serializes metadata only (bytes are stored separately as a file).
+  Map<String, dynamic> toJson() => {
+        'colorCount': colorCount,
+        'processingDurationMs': processingDurationMs,
+        'dominantColors': dominantColors,
+        if (complexity != null) 'complexity': complexity!.toJson(),
+      };
 
   @override
   String toString() =>
