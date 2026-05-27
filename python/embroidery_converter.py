@@ -6,14 +6,22 @@ Converts processed images to embroidery files using pyembroidery.
 Fill algorithm: diagonal tatami fill (boustrophedon) + contour outline.
 This replaces the v1 horizontal scanline approach which produced striped output.
 
+Outline algorithm: vtracer (if installed) or cv2.findContours (fallback).
+vtracer converts the binary mask to smooth SVG polygons, producing cleaner
+embroidery outlines without pixel-staircase jaggedness.
+
 Supported output formats:
     DST, PES, JEF, EXP, HUS, VIP, VP3, XXX, SEW, CSD, EMB, OFM
 
-Dependencies:
+Dependencies (required):
     - pyembroidery: embroidery file format library
     - Pillow (PIL): image I/O
     - numpy: array operations
     - opencv-python-headless: contour extraction and mask rotation
+
+Dependencies (optional):
+    - vtracer: smooth polygon outline tracing (pip install vtracer)
+      Falls back to cv2.findContours if not installed.
 """
 
 import cv2
@@ -64,7 +72,7 @@ class EmbroideryConverter:
     1. Parse the image and extract unique colors.
     2. For each color region:
        a. Tatami fill: diagonal scanlines alternating direction (boustrophedon).
-       b. Contour outline: running stitches along the boundary.
+       b. Contour outline: smooth polygon via vtracer (or cv2 fallback).
     3. Write the design using pyembroidery.
     """
 
@@ -178,15 +186,15 @@ class EmbroideryConverter:
             # Generate stitches based on requested type
             if stitch_type == "outline":
                 fill_pts = []
-                outline_pts = _trace_outline(color_mask, stitch_spacing_px)
+                outline_pts = _vectorize_outline(color_mask, stitch_spacing_px)
             elif stitch_type == "satin":
                 # Dense horizontal fill (0°) — approximates satin for narrow shapes
                 fill_pts = _tatami_fill(color_mask, max(1, stitch_spacing_px // 2), 0.0)
                 outline_pts = []
             else:
-                # Default: "fill" — diagonal tatami + contour outline
+                # Default: "fill" — diagonal tatami + smooth contour outline
                 fill_pts = _tatami_fill(color_mask, stitch_spacing_px, FILL_ANGLE_DEG)
-                outline_pts = _trace_outline(color_mask, stitch_spacing_px)
+                outline_pts = _vectorize_outline(color_mask, stitch_spacing_px)
 
             preview_points: list[float] = []
             prev_eu: tuple[int, int] | None = None
@@ -429,6 +437,135 @@ def _trace_outline(
             path_points.extend([float(pts[0][0]), float(pts[0][1])])
 
     return path_points
+
+
+def _vectorize_outline(
+    color_mask: np.ndarray,
+    stitch_spacing_px: int,
+) -> list[float]:
+    """
+    Trace the outer contour as running stitches.
+
+    Attempts to use vtracer (smooth polygon paths) when available.
+    Falls back to cv2.findContours if vtracer is not installed or fails.
+
+    vtracer produces cleaner outlines by fitting polygons to the raster mask,
+    eliminating the pixel-staircase jaggedness of cv2 contours.
+    """
+    try:
+        import vtracer as _vtracer  # optional dependency
+    except ImportError:
+        return _trace_outline(color_mask, stitch_spacing_px)
+
+    try:
+        binary_img = Image.fromarray((color_mask.astype(np.uint8) * 255), mode='L')
+        buf = io.BytesIO()
+        binary_img.save(buf, format='PNG')
+
+        svg_str = _vtracer.convert_raw_image_to_svg(
+            buf.getvalue(),
+            colormode='binary',
+            # Ignore noise specks smaller than ~half a stitch spacing
+            filter_speckle=max(2, stitch_spacing_px // 2),
+            # Polygon mode: emits only M/L/Z commands — no bezier splines.
+            # Keeps the parser simple and avoids over-smoothing fine details.
+            mode='none',
+            corner_threshold=60,   # lower = more corners kept
+            length_threshold=4.0,  # minimum segment length (px) to preserve
+            path_precision=2,      # decimal places in SVG coordinates
+        )
+
+        polygons = _parse_svg_polygons(svg_str)
+        if not polygons:
+            return _trace_outline(color_mask, stitch_spacing_px)
+
+        path_points: list[float] = []
+        for polygon in polygons:
+            if len(polygon) < 2:
+                continue
+            n = len(polygon)
+            for i in range(n):
+                x0, y0 = polygon[i]
+                x1, y1 = polygon[(i + 1) % n]
+                path_points.extend(
+                    _discretize_segment(x0, y0, x1, y1, stitch_spacing_px)
+                )
+            # Close the contour back to the start point
+            if path_points:
+                path_points.extend([polygon[0][0], polygon[0][1]])
+
+        return path_points if path_points else _trace_outline(color_mask, stitch_spacing_px)
+
+    except Exception as exc:
+        logger.debug("vtracer outline failed (%s) — falling back to cv2", exc)
+        return _trace_outline(color_mask, stitch_spacing_px)
+
+
+def _parse_svg_polygons(svg_str: str) -> list[list[tuple[float, float]]]:
+    """
+    Extract polygon point lists from SVG path `d` attributes.
+
+    vtracer polygon mode (mode='none') emits only M (moveto), L (lineto),
+    and Z (closepath) commands — both absolute and relative variants.
+    """
+    import re
+
+    number_pat = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
+    polygons: list[list[tuple[float, float]]] = []
+
+    for d_attr in re.findall(r'\bd="([^"]+)"', svg_str):
+        tokens = re.findall(rf'[MmLlZz]|{number_pat}', d_attr)
+        polygon: list[tuple[float, float]] = []
+        cmd = 'M'
+        i = 0
+
+        while i < len(tokens):
+            t = tokens[i]
+            if t in 'MmLlZz':
+                cmd = t
+                i += 1
+                continue
+
+            if cmd in ('Z', 'z'):
+                i += 1
+                continue
+
+            # Expect two consecutive numbers for a coordinate pair
+            if i + 1 < len(tokens) and tokens[i + 1] not in 'MmLlZz':
+                x, y = float(tokens[i]), float(tokens[i + 1])
+                # Relative commands offset from current position
+                if cmd in ('m', 'l') and polygon:
+                    x += polygon[-1][0]
+                    y += polygon[-1][1]
+                polygon.append((x, y))
+                i += 2
+            else:
+                i += 1  # skip malformed token
+
+        if len(polygon) >= 3:
+            polygons.append(polygon)
+
+    return polygons
+
+
+def _discretize_segment(
+    x0: float, y0: float,
+    x1: float, y1: float,
+    spacing: int,
+) -> list[float]:
+    """Sample stitch points along a line segment at `spacing` pixel intervals."""
+    dx, dy = x1 - x0, y1 - y0
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1e-6:
+        return [x0, y0]
+
+    steps = max(1, int(length / spacing))
+    pts: list[float] = []
+    for k in range(steps):
+        t = k / steps
+        pts.append(x0 + dx * t)
+        pts.append(y0 + dy * t)
+    return pts
 
 
 def _split_runs(xs: np.ndarray, max_gap: int) -> list[np.ndarray]:
