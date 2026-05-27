@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -9,6 +12,7 @@ import '../../domain/models/embroidery_design.dart';
 import '../../domain/models/workflow_state.dart';
 import '../../infrastructure/export/desktop_export_manager.dart';
 import '../../infrastructure/export/mobile_export_manager.dart';
+import '../../infrastructure/export/usb_drive_detector.dart';
 import '../widgets/contextual_help_button.dart';
 
 /// Step 5: Export screen.
@@ -30,6 +34,12 @@ class _ExportScreenState extends State<ExportScreen> {
   String? _exportedPath;
   String? _errorMessage;
 
+  // USB detection — Windows only
+  final _usbDetector = UsbDriveDetector();
+  List<UsbDrive> _usbDrives = [];
+  Timer? _usbPollTimer;
+  String? _usbCopyStatus; // drive letter of the last successful USB copy
+
   bool get _isDesktop =>
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.linux ||
@@ -37,6 +47,54 @@ class _ExportScreenState extends State<ExportScreen> {
 
   ExportManager get _exportManager =>
       _isDesktop ? DesktopExportManager() : MobileExportManager();
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isWindows) {
+      // Poll immediately, then every 3 seconds
+      _pollUsb();
+      _usbPollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollUsb());
+    }
+  }
+
+  @override
+  void dispose() {
+    _usbPollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _pollUsb() async {
+    final drives = await _usbDetector.detectRemovableDrives();
+    if (mounted) setState(() => _usbDrives = drives);
+  }
+
+  Future<void> _copyToUsb(UsbDrive drive, EmbroideryDesign design, String format) async {
+    final bytes = design.fileBytes;
+    if (bytes == null) return;
+
+    setState(() => _errorMessage = null);
+
+    try {
+      final filename = ExportConfig.defaultFilename(format);
+      final dest = '${drive.letter}\\$filename';
+      await File(dest).writeAsBytes(bytes, flush: true);
+
+      if (mounted) {
+        setState(() => _usbCopyStatus = drive.letter);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Copiado para ${drive.displayName} → $filename'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Erro ao copiar para USB: $e');
+      }
+    }
+  }
 
   Future<void> _export(WorkflowBlocState state) async {
     final design = state.generatedDesign;
@@ -161,6 +219,21 @@ class _ExportScreenState extends State<ExportScreen> {
                   if (design.validation != null) ...[
                     const SizedBox(height: 12),
                     _ValidationCard(validation: design.validation!),
+                  ],
+
+                  // USB drives card — shown when removable drives are detected
+                  if (_isDesktop && _usbDrives.isNotEmpty && design.fileBytes != null) ...[
+                    const SizedBox(height: 12),
+                    _UsbDrivesCard(
+                      drives: _usbDrives,
+                      format: params.outputFormat.extension,
+                      lastCopiedLetter: _usbCopyStatus,
+                      onCopy: (drive) => _copyToUsb(
+                        drive,
+                        design,
+                        params.outputFormat.extension,
+                      ),
+                    ),
                   ],
                 ],
 
@@ -507,6 +580,104 @@ class _SuccessBanner extends StatelessWidget {
     );
   }
 }
+
+// ── USB Drives Card ───────────────────────────────────────────────────────────
+
+class _UsbDrivesCard extends StatelessWidget {
+  const _UsbDrivesCard({
+    required this.drives,
+    required this.format,
+    required this.onCopy,
+    this.lastCopiedLetter,
+  });
+
+  final List<UsbDrive> drives;
+  final String format;
+  final String? lastCopiedLetter;
+  final void Function(UsbDrive) onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.usb, color: Colors.blue.shade700, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Máquina detectada',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: Colors.blue.shade800,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Copie o arquivo diretamente para o pendrive da máquina.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.blue.shade700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...drives.map((drive) {
+            final copied = drive.letter == lastCopiedLetter;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    copied ? Icons.check_circle : Icons.drive_file_move_outline,
+                    size: 18,
+                    color: copied ? Colors.green.shade700 : Colors.blue.shade600,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      drive.displayName,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: copied ? null : () => onCopy(drive),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      minimumSize: Size.zero,
+                    ),
+                    icon: Icon(
+                      copied ? Icons.check : Icons.copy,
+                      size: 16,
+                    ),
+                    label: Text(
+                      copied ? 'Copiado' : 'Copiar .$format',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Error Banner ──────────────────────────────────────────────────────────────
 
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.message});
