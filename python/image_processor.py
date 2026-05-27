@@ -262,7 +262,13 @@ class ImageProcessor:
         return Image.fromarray(result, mode="RGBA")
 
     def _simplify_regions(self, pil_image: Image.Image) -> Image.Image:
-        """Smooth region boundaries using polygon approximation (approxPolyDP)."""
+        """Smooth region boundaries using polygon approximation (approxPolyDP).
+
+        Uses RETR_TREE to retrieve the full contour hierarchy so that holes
+        (inner contours) are preserved — e.g. the inside of letters "O", "B",
+        donuts, etc. Outer contours are filled with 255; inner contours (holes)
+        are erased back to 0.
+        """
         rgba = np.array(pil_image, dtype=np.uint8)
         alpha = rgba[:, :, 3]
         rgb = rgba[:, :, :3]
@@ -287,17 +293,24 @@ class ImageProcessor:
                 (rgb[:, :, 0] == r) & (rgb[:, :, 1] == g) & (rgb[:, :, 2] == b) & mask
             ).astype(np.uint8) * 255
 
-            contours, _ = cv2.findContours(
-                color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            # RETR_TREE preserves the full contour hierarchy.
+            # hierarchy shape: (1, N, 4) — [next, prev, first_child, parent]
+            contours, hierarchy = cv2.findContours(
+                color_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
             )
-            if not contours:
+            if not contours or hierarchy is None:
                 continue
 
             simplified = np.zeros(rgb.shape[:2], dtype=np.uint8)
-            for contour in contours:
+            hier = hierarchy[0]  # shape (N, 4)
+
+            for j, contour in enumerate(contours):
                 epsilon = 0.02 * cv2.arcLength(contour, True)
                 approx = cv2.approxPolyDP(contour, epsilon, True)
-                cv2.fillPoly(simplified, [approx], 255)
+                # Contours with no parent (hier[j][3] == -1) are outer boundaries.
+                # Contours with a parent are holes — fill with 0 to punch through.
+                fill_value = 0 if hier[j][3] >= 0 else 255
+                cv2.fillPoly(simplified, [approx], fill_value)
 
             result_rgb[simplified > 0] = [r, g, b]
             result_mask = np.maximum(result_mask, simplified)

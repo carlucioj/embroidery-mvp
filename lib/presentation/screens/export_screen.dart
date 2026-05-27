@@ -114,6 +114,7 @@ class _ExportScreenState extends State<ExportScreen> {
 
       // Select destination
       final destination = await _exportManager.selectDestination(filename);
+      if (!mounted) return;
       if (destination == null) {
         // User cancelled
         setState(() => _isExporting = false);
@@ -125,6 +126,7 @@ class _ExportScreenState extends State<ExportScreen> {
         destination,
         design.fileBytes?.length ?? 0,
       );
+      if (!mounted) return;
       if (validationError != null) {
         setState(() {
           _isExporting = false;
@@ -143,16 +145,15 @@ class _ExportScreenState extends State<ExportScreen> {
         ),
       );
 
+      if (!mounted) return;
       if (result.success) {
         setState(() {
           _isExporting = false;
           _exportedPath = result.filePath;
         });
-        if (mounted) {
-          context
-              .read<WorkflowBloc>()
-              .add(WorkflowExportCompleted(result.filePath));
-        }
+        context
+            .read<WorkflowBloc>()
+            .add(WorkflowExportCompleted(result.filePath));
       } else {
         setState(() {
           _isExporting = false;
@@ -161,6 +162,7 @@ class _ExportScreenState extends State<ExportScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isExporting = false;
         _errorMessage = 'Erro inesperado ao exportar. Tente novamente.';
