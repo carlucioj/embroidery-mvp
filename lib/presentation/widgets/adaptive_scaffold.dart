@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../application/workflow/workflow_bloc.dart';
+import '../../application/workflow/workflow_persistence.dart';
 import '../../domain/models/workflow_state.dart';
 import '../controllers/adaptive_ui_controller.dart';
 
@@ -225,12 +226,33 @@ class _FeedbackDialog extends StatefulWidget {
 
 class _FeedbackDialogState extends State<_FeedbackDialog> {
   final _controller = TextEditingController();
+  final _persistence = WorkflowPersistence();
   int _rating = 5;
+  bool _submitting = false;
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() => _submitting = true);
+
+    await _persistence.savePendingFeedback({
+      'rating': _rating,
+      'comment': _controller.text.trim(),
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Obrigado pelo seu feedback!'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -274,17 +296,14 @@ class _FeedbackDialogState extends State<_FeedbackDialog> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () {
-            // TODO: submit feedback via FeedbackController
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Obrigado pelo seu feedback!'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          },
-          child: const Text('Enviar'),
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Enviar'),
         ),
       ],
     );
