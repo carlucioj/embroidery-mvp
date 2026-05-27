@@ -263,8 +263,9 @@ void main() {
 
       final path = StitchPath.fromJson(json);
 
-      expect(path.points.every((v) => v is double), isTrue);
+      // All values must be exact doubles (not int-typed after JSON decode)
       expect(path.points, [0.0, 10.0, 20.0, 30.0]);
+      expect(path.points.first, isA<double>());
     });
   });
 
@@ -443,7 +444,8 @@ void main() {
       final restored = EmbroideryDesign.fromJsonString(design.toJsonString());
       final points = restored.stitchPaths.first.points;
 
-      expect(points.every((v) => v is double), isTrue);
+      expect(points.first, isA<double>());
+      expect(points, [0.0, 10.0]);
     });
   });
 }

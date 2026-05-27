@@ -2,16 +2,34 @@ import 'dart:typed_data';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:embroidery_mvp/application/workflow/workflow_bloc.dart';
+import 'package:embroidery_mvp/application/workflow/workflow_persistence.dart';
 import 'package:embroidery_mvp/domain/models/image_data.dart';
 import 'package:embroidery_mvp/domain/models/workflow_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// No-op persistence — prevents real disk I/O during unit tests.
+class _FakePersistence extends WorkflowPersistence {
+  int saveCount = 0;
+  int clearCount = 0;
+
+  @override
+  void scheduleSave(WorkflowBlocState state) => saveCount++;
+
+  @override
+  Future<void> saveWorkflowState(WorkflowBlocState state) async => saveCount++;
+
+  @override
+  Future<void> clearWorkflowState() async => clearCount++;
+}
+
 void main() {
   group('WorkflowBloc', () {
     late WorkflowBloc bloc;
+    late _FakePersistence fakePersistence;
 
     setUp(() {
-      bloc = WorkflowBloc();
+      fakePersistence = _FakePersistence();
+      bloc = WorkflowBloc(persistence: fakePersistence);
     });
 
     tearDown(() {
@@ -34,7 +52,7 @@ void main() {
 
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'stores captured image',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         act: (bloc) => bloc.add(WorkflowImageCaptured(testImage)),
         expect: () => [
           predicate<WorkflowBlocState>(
@@ -45,7 +63,7 @@ void main() {
 
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'clears downstream data when new image is captured',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         seed: () => WorkflowBlocState(
           currentStep: WorkflowStep.imageCleaning,
           onboardingCompleted: false,
@@ -69,7 +87,7 @@ void main() {
     group('WorkflowAdvanceRequested', () {
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'shows validation error when advancing without image',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         act: (bloc) => bloc.add(const WorkflowAdvanceRequested()),
         expect: () => [
           predicate<WorkflowBlocState>(
@@ -82,7 +100,7 @@ void main() {
 
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'advances to imageCleaning when image is captured',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         seed: () => WorkflowBlocState(
           currentStep: WorkflowStep.imageCapture,
           onboardingCompleted: false,
@@ -107,7 +125,7 @@ void main() {
     group('WorkflowGoBackRequested', () {
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'goes back to imageCapture from imageCleaning',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         seed: () => const WorkflowBlocState(
           currentStep: WorkflowStep.imageCleaning,
           onboardingCompleted: false,
@@ -124,16 +142,22 @@ void main() {
 
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'does nothing when already at imageCapture',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         act: (bloc) => bloc.add(const WorkflowGoBackRequested()),
         expect: () => <WorkflowBlocState>[],
       );
     });
 
     group('WorkflowReset', () {
+      test('calls clearWorkflowState on persistence', () async {
+        bloc.add(const WorkflowReset());
+        await Future<void>.delayed(Duration.zero); // let async clear run
+        expect(fakePersistence.clearCount, 1);
+      });
+
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'resets to initial state',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         seed: () => WorkflowBlocState(
           currentStep: WorkflowStep.generation,
           onboardingCompleted: true,
@@ -165,7 +189,7 @@ void main() {
     group('WorkflowOnboardingCompleted', () {
       blocTest<WorkflowBloc, WorkflowBlocState>(
         'marks onboarding as completed and advances to imageCapture',
-        build: () => WorkflowBloc(),
+        build: () => WorkflowBloc(persistence: _FakePersistence()),
         seed: () => const WorkflowBlocState(
           currentStep: WorkflowStep.onboarding,
           onboardingCompleted: false,
