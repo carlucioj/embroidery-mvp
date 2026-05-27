@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
@@ -127,7 +128,16 @@ class PyEmbroideryConverter implements EmbroideryConverter {
 
     _emitProgress(0.85, 'Finalizando design...');
 
-    final fileBytes = result['fileBytes'] as Uint8List;
+    // HTTP path: ProcessingApiClient already decoded base64 → Uint8List.
+    // MethodChannel path: method_channel_handler returns base64 String.
+    // Handle both so the bridge path works if/when the native plugin is wired.
+    final rawFileBytes = result['fileBytes'];
+    final Uint8List fileBytes;
+    if (rawFileBytes is Uint8List) {
+      fileBytes = rawFileBytes;
+    } else {
+      fileBytes = base64Decode(rawFileBytes as String);
+    }
     final totalStitches = result['totalStitches'] as int? ?? 0;
     final colorChangeCount = result['colorChanges'] as int? ?? 0;
     final estimatedMinutes =
