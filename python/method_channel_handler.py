@@ -86,10 +86,12 @@ class MethodChannelHandler:
 
         image_bytes = base64.b64decode(image_b64)
         max_colors = int(args.get("maxColors", 8))
+        remove_background = bool(args.get("removeBackground", True))
 
         result_bytes = self._processor.process_image(
             image_bytes=image_bytes,
             max_colors=max_colors,
+            remove_background=remove_background,
         )
 
         return base64.b64encode(result_bytes).decode("ascii")

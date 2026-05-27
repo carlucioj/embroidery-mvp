@@ -56,6 +56,7 @@ class ImageProcessor:
         self,
         image_bytes: bytes,
         max_colors: int = 8,
+        remove_background: bool = True,
     ) -> bytes:
         """
         Remove background and reduce colors from an image.
@@ -95,10 +96,10 @@ class ImageProcessor:
         )
 
         # ── Remove background ───────────────────────────────────────────────
-        if self._use_rembg:
+        if self._use_rembg and remove_background:
             pil_image = self._remove_background(pil_image, image_bytes)
         else:
-            logger.info("Skipping background removal (rembg not available)")
+            logger.info("Skipping background removal (disabled or rembg not available)")
 
         # ── Reduce colors ───────────────────────────────────────────────────
         pil_image = self._reduce_colors(pil_image, max_colors)

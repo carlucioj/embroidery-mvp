@@ -8,6 +8,7 @@ import '../../core/constants.dart';
 import '../../domain/models/embroidery_parameters.dart';
 import '../../domain/models/workflow_state.dart';
 import '../widgets/contextual_help_button.dart';
+import '../widgets/hoop_canvas.dart';
 
 /// Step 3: Embroidery parameters screen.
 ///
@@ -27,6 +28,7 @@ class _ParametersScreenState extends State<ParametersScreen> {
   HoopSize? _selectedHoop;
   FabricType? _selectedFabric;
   EmbroideryFormat? _selectedFormat;
+  StitchType _selectedStitchType = StitchType.fill;
 
   final _widthController = TextEditingController();
   final _heightController = TextEditingController();
@@ -44,13 +46,13 @@ class _ParametersScreenState extends State<ParametersScreen> {
   }
 
   void _loadDefaults() {
-    // Default to first rectangular hoop and cotton fabric
-    _selectedHoop = HoopSizes.rectangular.first;
+    final hoop = HoopSizes.rectangular.first;
+    _selectedHoop = hoop;
     _selectedFabric = FabricTypes.cotton;
     _selectedFormat = OutputFormats.all.first;
-    _widthController.text = '100';
-    _heightController.text = '100';
-    _originalAspectRatio = 1.0;
+    _widthController.text = hoop.widthMm.toStringAsFixed(0);
+    _heightController.text = hoop.heightMm.toStringAsFixed(0);
+    _originalAspectRatio = hoop.widthMm / hoop.heightMm;
   }
 
   @override
@@ -162,6 +164,7 @@ class _ParametersScreenState extends State<ParametersScreen> {
       designWidthMm: double.tryParse(_widthController.text) ?? 100,
       designHeightMm: double.tryParse(_heightController.text) ?? 100,
       outputFormat: _selectedFormat!,
+      stitchType: _selectedStitchType,
       maintainAspectRatio: _maintainAspectRatio,
     );
 
@@ -223,6 +226,16 @@ class _ParametersScreenState extends State<ParametersScreen> {
 
             const SizedBox(height: 20),
 
+            // ── Stitch type ─────────────────────────────────────────────
+            const _SectionLabel(label: 'Tipo de Ponto'),
+            const SizedBox(height: 8),
+            _StitchTypeSelector(
+              selected: _selectedStitchType,
+              onChanged: (t) => setState(() => _selectedStitchType = t),
+            ),
+
+            const SizedBox(height: 20),
+
             // ── Design size ─────────────────────────────────────────────
             const _SectionLabel(label: 'Tamanho do Design (mm)'),
             const SizedBox(height: 8),
@@ -238,6 +251,42 @@ class _ParametersScreenState extends State<ParametersScreen> {
                   setState(() => _maintainAspectRatio = !_maintainAspectRatio),
               onFitToHoop: _fitToHoop,
             ),
+
+            const SizedBox(height: 20),
+
+            // ── Hoop preview canvas ─────────────────────────────────────
+            if (_selectedHoop != null) ...[
+              const _SectionLabel(label: 'Prévia do Bastidor'),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 220,
+                child: HoopCanvas(
+                  parameters: EmbroideryParameters(
+                    hoop: _selectedHoop!,
+                    fabric: _selectedFabric ?? FabricTypes.cotton,
+                    designWidthMm: double.tryParse(_widthController.text) ?? 100,
+                    designHeightMm: double.tryParse(_heightController.text) ?? 100,
+                    outputFormat: _selectedFormat ?? OutputFormats.all.first,
+                    stitchType: _selectedStitchType,
+                    maintainAspectRatio: _maintainAspectRatio,
+                  ),
+                  onSizeChanged: (w, h) {
+                    setState(() {
+                      _widthController.text = w.toStringAsFixed(1);
+                      _heightController.text = h.toStringAsFixed(1);
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Arraste o design ou use as alças para redimensionar.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+            ],
 
             const SizedBox(height: 20),
 
@@ -493,6 +542,57 @@ class _SizeControls extends StatelessWidget {
           label: const Text('Ajustar ao Bastidor'),
         ),
       ],
+    );
+  }
+}
+
+class _StitchTypeSelector extends StatelessWidget {
+  const _StitchTypeSelector({required this.selected, required this.onChanged});
+
+  final StitchType selected;
+  final ValueChanged<StitchType> onChanged;
+
+  static const _icons = {
+    StitchType.fill: Icons.format_paint_outlined,
+    StitchType.outline: Icons.border_style,
+    StitchType.satin: Icons.horizontal_rule,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: StitchType.values.map((type) {
+        final isSelected = selected == type;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outlineVariant,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: ListTile(
+            leading: Icon(
+              _icons[type],
+              color: isSelected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            title: Text(type.label,
+                style: const TextStyle(fontWeight: FontWeight.w500)),
+            subtitle: Text(type.description),
+            trailing: isSelected
+                ? Icon(Icons.check_circle,
+                    color: theme.colorScheme.primary, size: 20)
+                : null,
+            onTap: () => onChanged(type),
+          ),
+        );
+      }).toList(),
     );
   }
 }
