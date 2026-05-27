@@ -1,5 +1,59 @@
 import 'dart:typed_data';
 
+// ── Complexity analysis ───────────────────────────────────────────────────────
+
+enum ComplexityLevel { simple, medium, complex }
+
+/// Analysis result from the Python image processor after color quantization.
+class ImageComplexity {
+  const ImageComplexity({
+    required this.level,
+    required this.score,
+    required this.uniqueColors,
+    required this.edgeDensity,
+    required this.regionCount,
+    required this.avgRegionAreaPx,
+  });
+
+  final ComplexityLevel level;
+  final int score;
+  final int uniqueColors;
+  final double edgeDensity;
+  final int regionCount;
+  final double avgRegionAreaPx;
+
+  factory ImageComplexity.fromJson(Map<String, dynamic> json) {
+    final levelStr = json['level'] as String? ?? 'simple';
+    final level = switch (levelStr) {
+      'medium' => ComplexityLevel.medium,
+      'complex' => ComplexityLevel.complex,
+      _ => ComplexityLevel.simple,
+    };
+    return ImageComplexity(
+      level: level,
+      score: (json['score'] as num?)?.toInt() ?? 0,
+      uniqueColors: (json['unique_colors'] as num?)?.toInt() ?? 0,
+      edgeDensity: (json['edge_density'] as num?)?.toDouble() ?? 0.0,
+      regionCount: (json['region_count'] as num?)?.toInt() ?? 0,
+      avgRegionAreaPx: (json['avg_region_area_px'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  String get levelLabel => switch (level) {
+        ComplexityLevel.simple => 'Simples',
+        ComplexityLevel.medium => 'Moderada',
+        ComplexityLevel.complex => 'Complexa',
+      };
+
+  String get recommendation => switch (level) {
+        ComplexityLevel.simple => 'Boa para bordado direto.',
+        ComplexityLevel.medium => 'Refinamento pode melhorar o resultado.',
+        ComplexityLevel.complex => 'Refinamento recomendado ou use outra imagem.',
+      };
+}
+
+// ── Image models ──────────────────────────────────────────────────────────────
+
 /// Represents an image loaded into the application.
 class ImageData {
   const ImageData({
@@ -72,6 +126,7 @@ class ProcessedImage {
     required this.colorCount,
     required this.processingDurationMs,
     this.dominantColors = const [],
+    this.complexity,
   });
 
   /// Processed image bytes (PNG with transparency)
@@ -85,6 +140,9 @@ class ProcessedImage {
 
   /// List of dominant colors as ARGB integers
   final List<int> dominantColors;
+
+  /// Complexity analysis from the Python backend (null if not available)
+  final ImageComplexity? complexity;
 
   @override
   String toString() =>

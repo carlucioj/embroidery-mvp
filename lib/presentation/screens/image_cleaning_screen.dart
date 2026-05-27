@@ -7,8 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../application/workflow/workflow_bloc.dart';
 import '../../core/app_router.dart';
 import '../../core/server_config.dart';
-import '../../domain/interfaces/image_processor.dart';
-import '../../domain/models/image_data.dart';
+import '../../domain/interfaces/image_processor.dart' show ImageProcessingException, ProcessingMode, ProcessingOptions, RefinementMode;
+import '../../domain/models/image_data.dart' show ComplexityLevel, ImageComplexity, ImageData, ProcessedImage;
 import '../../domain/models/workflow_state.dart';
 import '../../infrastructure/image/dart_image_processor.dart';
 import '../../infrastructure/image/remote_image_processor.dart';
@@ -40,6 +40,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
   ProcessedImage? _result;
   bool _usedServer = false;
   bool? _serverAvailable;
+  RefinementMode _refinementMode = RefinementMode.none;
 
   @override
   void initState() {
@@ -64,6 +65,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
       _usedServer = false;
     });
 
+
     if (_serverAvailable == true) {
       final ok = await _tryServerProcessing(image);
       if (ok) return;
@@ -86,6 +88,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
           removeBackground: _removeBackground,
           maxColors: _maxColors,
           mode: ProcessingMode.remote,
+          refinementMode: _refinementMode,
         ),
       );
       if (mounted) {
@@ -127,6 +130,11 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
       await sub.cancel();
       dart.dispose();
     }
+  }
+
+  Future<void> _refineImage(ImageData image, RefinementMode mode) async {
+    setState(() => _refinementMode = mode);
+    await _cleanArt(image);
   }
 
   void _skipCleaning(ImageData image) {
@@ -232,13 +240,35 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
                 // ── Success banner ────────────────────────────────────────
                 if (_result != null && !_isProcessing) ...[
                   _SuccessBanner(colorCount: _result!.colorCount, usedServer: _usedServer),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Complexity badge ──────────────────────────────────────
+                if (_result?.complexity != null && !_isProcessing) ...[
+                  _ComplexityBadge(complexity: _result!.complexity!),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Refinement card (always shown after processing, not just medium/complex)
+                if (_result != null &&
+                    _refinementMode == RefinementMode.none &&
+                    !_isProcessing) ...[
+                  _RefinementCard(
+                    complexity: _result!.complexity,
+                    onRefineLight: () => _refineImage(originalImage, RefinementMode.light),
+                    onRefineAdvanced: () => _refineImage(originalImage, RefinementMode.advanced),
+                    onChangeImage: _goBack,
+                  ),
+                  const SizedBox(height: 12),
                 ],
 
                 // ── Action buttons ────────────────────────────────────────
                 if (!_isProcessing) ...[
                   FilledButton.icon(
-                    onPressed: () => _cleanArt(originalImage),
+                    onPressed: () {
+                      setState(() => _refinementMode = RefinementMode.none);
+                      _cleanArt(originalImage);
+                    },
                     icon: const Icon(Icons.auto_fix_high),
                     label: Text(_result != null ? 'Aplicar Novamente' : 'Aplicar Ajustes'),
                   ),
@@ -774,6 +804,213 @@ class _SuccessBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ComplexityBadge extends StatelessWidget {
+  const _ComplexityBadge({required this.complexity});
+
+  final ImageComplexity complexity;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (color, bgColor, icon) = switch (complexity.level) {
+      ComplexityLevel.simple => (
+          Colors.green.shade700,
+          Colors.green.shade50,
+          Icons.check_circle_outline,
+        ),
+      ComplexityLevel.medium => (
+          Colors.orange.shade700,
+          Colors.orange.shade50,
+          Icons.warning_amber_outlined,
+        ),
+      ComplexityLevel.complex => (
+          Colors.red.shade700,
+          Colors.red.shade50,
+          Icons.error_outline,
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Complexidade: ${complexity.levelLabel}',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: color, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  complexity.recommendation,
+                  style: theme.textTheme.bodySmall?.copyWith(color: color),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${complexity.score}',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(color: color, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RefinementCard extends StatelessWidget {
+  const _RefinementCard({
+    required this.complexity,
+    required this.onRefineLight,
+    required this.onRefineAdvanced,
+    required this.onChangeImage,
+  });
+
+  final ImageComplexity? complexity;
+  final VoidCallback onRefineLight;
+  final VoidCallback onRefineAdvanced;
+  final VoidCallback onChangeImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isComplex = complexity?.level == ComplexityLevel.complex;
+
+    return Card(
+      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.tune, size: 15, color: theme.colorScheme.secondary),
+                const SizedBox(width: 8),
+                Text(
+                  'Deseja refinar a imagem?',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.secondary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Light refinement
+            _RefinementOption(
+              icon: Icons.brush_outlined,
+              label: RefinementMode.light.label,
+              hint: RefinementMode.light.hint,
+              onTap: onRefineLight,
+            ),
+            const SizedBox(height: 6),
+
+            // Advanced refinement
+            _RefinementOption(
+              icon: Icons.auto_fix_high,
+              label: RefinementMode.advanced.label,
+              hint: RefinementMode.advanced.hint,
+              onTap: onRefineAdvanced,
+              warning: isComplex
+                  ? 'Pode apagar traços finos. Use leve se a imagem tiver linhas.'
+                  : null,
+            ),
+
+            if (isComplex) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onChangeImage,
+                icon: const Icon(Icons.photo_library_outlined, size: 16),
+                label: const Text('Usar outra imagem'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RefinementOption extends StatelessWidget {
+  const _RefinementOption({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.onTap,
+    this.warning,
+  });
+
+  final IconData icon;
+  final String label;
+  final String hint;
+  final VoidCallback onTap;
+  final String? warning;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: theme.colorScheme.secondary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  Text(hint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                  if (warning != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        warning!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right,
+                size: 18, color: theme.colorScheme.onSurfaceVariant),
+          ],
+        ),
       ),
     );
   }

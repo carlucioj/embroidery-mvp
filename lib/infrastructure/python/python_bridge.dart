@@ -53,6 +53,7 @@ class PythonBridge {
   /// [widthMm] - Design width in millimeters
   /// [heightMm] - Design height in millimeters
   /// [fabricId] - Fabric type ID ('knit', 'cotton', or 'towel')
+  /// [stitchType] - Stitch algorithm: 'fill', 'outline', or 'satin'
   ///
   /// Returns a map with:
   /// - 'fileBytes': Uint8List — the embroidery file bytes
@@ -65,6 +66,7 @@ class PythonBridge {
     required double widthMm,
     required double heightMm,
     required String fabricId,
+    String stitchType = 'fill',
   }) async {
     try {
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
@@ -75,6 +77,7 @@ class PythonBridge {
           'widthMm': widthMm,
           'heightMm': heightMm,
           'fabricId': fabricId,
+          'stitchType': stitchType,
         },
       );
 

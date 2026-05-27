@@ -87,14 +87,16 @@ class MethodChannelHandler:
         image_bytes = base64.b64decode(image_b64)
         max_colors = int(args.get("maxColors", 8))
         remove_background = bool(args.get("removeBackground", True))
+        mode = str(args.get("mode", "basic"))
 
-        result_bytes = self._processor.process_image(
+        result = self._processor.process_image(
             image_bytes=image_bytes,
             max_colors=max_colors,
             remove_background=remove_background,
+            mode=mode,
         )
 
-        return base64.b64encode(result_bytes).decode("ascii")
+        return base64.b64encode(result["image_bytes"]).decode("ascii")
 
     def _handle_convert_to_embroidery(self, args: dict) -> dict:
         """Convert a processed image to an embroidery file."""
@@ -108,12 +110,15 @@ class MethodChannelHandler:
         height_mm = float(args.get("heightMm", 100))
         fabric_id = args.get("fabricId", "cotton")
 
+        stitch_type = args.get("stitchType", "fill")
+
         result = self._converter.convert(
             image_bytes=image_bytes,
             output_format=output_format,
             width_mm=width_mm,
             height_mm=height_mm,
             fabric_id=fabric_id,
+            stitch_type=stitch_type,
         )
 
         # Encode file bytes as base64 for JSON transport
@@ -125,6 +130,7 @@ class MethodChannelHandler:
             "colors": result["colors"],
             "stitchPaths": result["stitch_paths"],
             "colorChangesList": result["color_changes_list"],
+            "validation": result["validation"],
         }
 
     def _handle_validate_capabilities(self) -> bool:
@@ -136,7 +142,7 @@ class MethodChannelHandler:
             img = Image.new("RGBA", (1, 1), (255, 255, 255, 255))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
-            self._processor.process_image(buf.getvalue(), max_colors=1)
+            self._processor.process_image(buf.getvalue(), max_colors=1)  # result ignored
             return True
         except Exception as e:
             logger.warning("Capability check failed: %s", e)
