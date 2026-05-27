@@ -73,7 +73,7 @@ lib/
 
 1. ~~ColorMapper race condition~~ — **CORRIGIDO** (`Completer` lock em `color_mapper.dart`).
 2. ~~Preview não implementado~~ — **CORRIGIDO** (`HoopCanvas._paintStitchPaths` + `GenerationScreen` já conectados).
-3. **Feedback sem backend** — UI coleta dados mas nunca envia. `TODO` em `adaptive_scaffold.dart:278`.
+3. ~~Feedback sem backend~~ — **CORRIGIDO** (`_FeedbackDialogState._submit()` chama `WorkflowPersistence.savePendingFeedback()`; dados persistidos localmente em SharedPreferences, prontos para envio quando um backend for adicionado).
 4. ~~Geração scanline simples~~ — **CORRIGIDO** (tatami fill diagonal + outline via `cv2.findContours` em `embroidery_converter.py`). Resize usa `Image.NEAREST` para preservar cores quantizadas.
 5. ~~Estado não persiste~~ — **CORRIGIDO** (`WorkflowPersistence` salva sessão completa: bytes em `embroidery_session/`, metadados em SharedPreferences; debounce 500ms; restaurado no startup via `main.dart`).
 
