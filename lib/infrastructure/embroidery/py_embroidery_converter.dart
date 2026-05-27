@@ -88,6 +88,7 @@ class PyEmbroideryConverter implements EmbroideryConverter {
       widthMm: parameters.designWidthMm,
       heightMm: parameters.designHeightMm,
       fabricId: parameters.fabric.id,
+      stitchType: parameters.stitchType.id,
       onProgress: (p) => _emitProgress(0.1 + p * 0.6, 'Gerando pontos...'),
     );
 
@@ -107,6 +108,7 @@ class PyEmbroideryConverter implements EmbroideryConverter {
       widthMm: parameters.designWidthMm,
       heightMm: parameters.designHeightMm,
       fabricId: parameters.fabric.id,
+      stitchType: parameters.stitchType.id,
     );
 
     if (_cancelled) throw const EmbroideryConversionException('Conversão cancelada.');
@@ -162,6 +164,33 @@ class PyEmbroideryConverter implements EmbroideryConverter {
       estimatedMinutes: estimatedMinutes,
     );
 
+    // Parse validation (handles both Map<String, dynamic> from HTTP and
+    // Map<dynamic, dynamic> from MethodChannel bridge)
+    final rawValidation = result['validation'];
+    DesignValidation? validation;
+    if (rawValidation is Map) {
+      final issues = (rawValidation['issues'] as List? ?? []).map((e) {
+        final im = e as Map;
+        return ValidationIssue(
+          code: im['code'] as String,
+          message: im['message'] as String,
+          severity: switch (im['severity'] as String) {
+            'error' => ValidationSeverity.error,
+            'warning' => ValidationSeverity.warning,
+            _ => ValidationSeverity.ok,
+          },
+        );
+      }).toList();
+      validation = DesignValidation(
+        severity: switch (rawValidation['severity'] as String) {
+          'error' => ValidationSeverity.error,
+          'warning' => ValidationSeverity.warning,
+          _ => ValidationSeverity.ok,
+        },
+        issues: issues,
+      );
+    }
+
     _emitProgress(1.0, 'Bordado gerado com sucesso!');
 
     return EmbroideryDesign(
@@ -172,6 +201,7 @@ class PyEmbroideryConverter implements EmbroideryConverter {
       colors: mappedColors,
       metrics: metrics,
       fileBytes: fileBytes,
+      validation: validation,
     );
   }
 

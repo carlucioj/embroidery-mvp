@@ -3,6 +3,9 @@ Embroidery Converter Module
 
 Converts processed images to embroidery files using pyembroidery.
 
+Fill algorithm: diagonal tatami fill (boustrophedon) + contour outline.
+This replaces the v1 horizontal scanline approach which produced striped output.
+
 Supported output formats:
     DST, PES, JEF, EXP, HUS, VIP, VP3, XXX, SEW, CSD, EMB, OFM
 
@@ -10,8 +13,10 @@ Dependencies:
     - pyembroidery: embroidery file format library
     - Pillow (PIL): image I/O
     - numpy: array operations
+    - opencv-python-headless: contour extraction and mask rotation
 """
 
+import cv2
 import io
 import logging
 import math
@@ -44,16 +49,23 @@ DEFAULT_STITCH_LENGTH_MM = 3.0
 # Embroidery unit: 1 unit = 0.1 mm
 UNITS_PER_MM = 10
 
+# Fill angle (degrees). 45° gives the classic diagonal tatami look.
+FILL_ANGLE_DEG = 45.0
+
+# Max gap (in embroidery units) before inserting a TRIM+JUMP
+TRIM_THRESHOLD_EU = 30  # 3 mm
+
 
 class EmbroideryConverter:
     """
     Converts a processed RGBA image to an embroidery design file.
 
-    The conversion pipeline:
-    1. Parse the image and extract unique colors
-    2. For each color, trace the filled regions as stitch paths
-    3. Apply density and stitch length based on fabric type
-    4. Write the design to the requested format using pyembroidery
+    Pipeline:
+    1. Parse the image and extract unique colors.
+    2. For each color region:
+       a. Tatami fill: diagonal scanlines alternating direction (boustrophedon).
+       b. Contour outline: running stitches along the boundary.
+    3. Write the design using pyembroidery.
     """
 
     def convert(
@@ -63,6 +75,7 @@ class EmbroideryConverter:
         width_mm: float,
         height_mm: float,
         fabric_id: str,
+        stitch_type: str = "fill",
     ) -> dict[str, Any]:
         """
         Convert a processed image to an embroidery file.
@@ -73,6 +86,10 @@ class EmbroideryConverter:
             width_mm: Desired design width in millimeters.
             height_mm: Desired design height in millimeters.
             fabric_id: Fabric type ID ("knit", "cotton", or "towel").
+            stitch_type: How to stitch each color region:
+                - "fill"    — diagonal tatami fill (45°) + contour outline
+                - "outline" — running stitch along boundary only
+                - "satin"   — dense horizontal fill (boustrophedon at 0°), no outline
 
         Returns:
             dict with keys:
@@ -81,12 +98,8 @@ class EmbroideryConverter:
                 - color_changes (int): Number of color changes.
                 - estimated_minutes (float): Estimated embroidery time.
                 - colors (list[int]): ARGB color values used.
-                - stitch_paths (list[dict]): Stitch path data for preview.
+                - stitch_paths (list[dict]): Stitch path data for canvas preview.
                 - color_changes_list (list[dict]): Color change events.
-
-        Raises:
-            ValueError: If parameters are invalid.
-            RuntimeError: If conversion fails.
         """
         fmt = output_format.upper()
         if fmt not in SUPPORTED_FORMATS:
@@ -100,23 +113,23 @@ class EmbroideryConverter:
 
         density = FABRIC_DENSITY.get(fabric_id, FABRIC_DENSITY["cotton"])
         stitch_length_mm = _stitch_length_for_density(density)
+        stitch_spacing_px = max(1, round(stitch_length_mm * 10))  # 10 px per mm
 
-        # Load image
         try:
             pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
         except Exception as e:
             raise ValueError(f"Não foi possível abrir a imagem: {e}") from e
 
-        # Scale image to target dimensions
-        target_w_px = max(1, int(width_mm * 10))   # 10 px per mm
+        # Scale image to target dimensions (10 px per mm)
+        target_w_px = max(1, int(width_mm * 10))
         target_h_px = max(1, int(height_mm * 10))
-        pil_image = pil_image.resize((target_w_px, target_h_px), Image.LANCZOS)
+        # NEAREST preserves quantized color boundaries — LANCZOS would create new anti-aliased colors
+        pil_image = pil_image.resize((target_w_px, target_h_px), Image.NEAREST)
 
         rgba = np.array(pil_image, dtype=np.uint8)
         alpha = rgba[:, :, 3]
         rgb = rgba[:, :, :3]
 
-        # Find unique colors (ignoring transparent pixels)
         mask = alpha > 10
         if not mask.any():
             raise ValueError(
@@ -127,23 +140,20 @@ class EmbroideryConverter:
         visible_pixels = rgb[mask]
         unique_colors = np.unique(visible_pixels, axis=0)
 
-        # Build pyembroidery pattern
         pattern = pyembroidery.EmbPattern()
         pattern.metadata("name", "Embroidery MVP Design")
 
-        stitch_length_units = int(stitch_length_mm * UNITS_PER_MM)
         total_stitches = 0
         color_change_count = 0
-        stitch_paths = []
-        color_changes_list = []
-        argb_colors = []
+        stitch_paths: list[dict] = []
+        color_changes_list: list[dict] = []
+        argb_colors: list[int] = []
 
         for color_idx, color_rgb in enumerate(unique_colors):
             r, g, b = int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2])
             argb = (0xFF << 24) | (r << 16) | (g << 8) | b
             argb_colors.append(argb)
 
-            # Add color to pattern
             pattern.add_thread({
                 "color": (r << 16) | (g << 8) | b,
                 "name": f"Color {color_idx + 1}",
@@ -158,53 +168,60 @@ class EmbroideryConverter:
                 })
                 color_change_count += 1
 
-            # Find pixels of this color
             color_mask = (
-                mask &
-                (rgb[:, :, 0] == r) &
-                (rgb[:, :, 1] == g) &
-                (rgb[:, :, 2] == b)
+                mask
+                & (rgb[:, :, 0] == r)
+                & (rgb[:, :, 1] == g)
+                & (rgb[:, :, 2] == b)
             )
 
-            # Generate fill stitches by scanning rows
-            path_points = []
-            ys, xs = np.where(color_mask)
+            # Generate stitches based on requested type
+            if stitch_type == "outline":
+                fill_pts = []
+                outline_pts = _trace_outline(color_mask, stitch_spacing_px)
+            elif stitch_type == "satin":
+                # Dense horizontal fill (0°) — approximates satin for narrow shapes
+                fill_pts = _tatami_fill(color_mask, max(1, stitch_spacing_px // 2), 0.0)
+                outline_pts = []
+            else:
+                # Default: "fill" — diagonal tatami + contour outline
+                fill_pts = _tatami_fill(color_mask, stitch_spacing_px, FILL_ANGLE_DEG)
+                outline_pts = _trace_outline(color_mask, stitch_spacing_px)
 
-            if len(ys) == 0:
-                continue
+            preview_points: list[float] = []
+            prev_eu: tuple[int, int] | None = None
 
-            # Group by row and create horizontal stitch runs
-            row_groups: dict[int, list[int]] = {}
-            for y, x in zip(ys.tolist(), xs.tolist()):
-                row_groups.setdefault(y, []).append(x)
+            for segment in (fill_pts, outline_pts):
+                first_in_segment = True
+                for i in range(0, len(segment) - 1, 2):
+                    px, py = segment[i], segment[i + 1]
+                    eu_x = int(px * UNITS_PER_MM / 10)
+                    eu_y = int(py * UNITS_PER_MM / 10)
 
-            stitch_spacing_px = max(1, int(stitch_length_units / UNITS_PER_MM))
-            path_stitch_count = 0
+                    if prev_eu is not None:
+                        dx = eu_x - prev_eu[0]
+                        dy = eu_y - prev_eu[1]
+                        dist = math.isqrt(dx * dx + dy * dy)
+                        if dist > TRIM_THRESHOLD_EU or first_in_segment:
+                            pattern.add_command(pyembroidery.TRIM)
+                            pattern.add_command(pyembroidery.JUMP)
 
-            for row_y in sorted(row_groups.keys()):
-                row_xs = sorted(row_groups[row_y])
-                # Sample stitches along the row
-                for x in row_xs[::stitch_spacing_px]:
-                    # Convert pixel coords to embroidery units
-                    eu_x = int(x * UNITS_PER_MM / 10)
-                    eu_y = int(row_y * UNITS_PER_MM / 10)
                     pattern.add_stitch_absolute(pyembroidery.STITCH, eu_x, eu_y)
-                    path_points.extend([float(eu_x), float(eu_y)])
-                    path_stitch_count += 1
+                    preview_points.extend([float(eu_x), float(eu_y)])
                     total_stitches += 1
+                    prev_eu = (eu_x, eu_y)
+                    first_in_segment = False
 
             stitch_paths.append({
                 "colorIndex": color_idx,
-                "stitchCount": path_stitch_count,
-                "points": path_points,
+                "stitchCount": len(preview_points) // 2,
+                "points": preview_points,
             })
 
         pattern.add_command(pyembroidery.END)
 
         # Write to temp file and read back bytes
-        with tempfile.NamedTemporaryFile(
-            suffix=f".{fmt.lower()}", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=f".{fmt.lower()}", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -215,17 +232,24 @@ class EmbroideryConverter:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-        # Estimate embroidery time: ~500 stitches per minute
         estimated_minutes = total_stitches / 500.0
+
+        validation = self._validate_output(
+            fmt=fmt,
+            file_bytes=file_bytes,
+            total_stitches=total_stitches,
+            color_count=len(unique_colors),
+        )
 
         logger.info(
             "Conversion complete: %d stitches, %d colors, %d color changes, "
-            "format=%s, estimated=%.1f min",
+            "format=%s, estimated=%.1f min, validation=%s",
             total_stitches,
             len(unique_colors),
             color_change_count,
             fmt,
             estimated_minutes,
+            validation["severity"],
         )
 
         return {
@@ -236,7 +260,184 @@ class EmbroideryConverter:
             "colors": argb_colors,
             "stitch_paths": stitch_paths,
             "color_changes_list": color_changes_list,
+            "validation": validation,
         }
+
+    def _validate_output(
+        self,
+        fmt: str,
+        file_bytes: bytes,
+        total_stitches: int,
+        color_count: int,
+    ) -> dict[str, Any]:
+        """Validate generated output against embroidery machine specs."""
+        issues: list[dict[str, str]] = []
+
+        if color_count == 0:
+            issues.append({
+                "code": "NO_COLORS",
+                "message": "Nenhuma cor encontrada no design.",
+                "severity": "error",
+            })
+        elif color_count > 64:
+            issues.append({
+                "code": "TOO_MANY_COLORS",
+                "message": f"{color_count} cores encontradas. O limite máximo suportado é 64.",
+                "severity": "error",
+            })
+        elif color_count > 16:
+            issues.append({
+                "code": "COLORS_EXCEED_CONSUMER_LIMIT",
+                "message": (
+                    f"{color_count} cores — máquinas Brother/Babylock consumer suportam até 16. "
+                    "Reduza as cores na tela de limpeza de imagem."
+                ),
+                "severity": "warning",
+            })
+
+        if total_stitches == 0:
+            issues.append({
+                "code": "NO_STITCHES",
+                "message": "Nenhum ponto foi gerado. Verifique se a imagem tem pixels visíveis.",
+                "severity": "error",
+            })
+        elif total_stitches > 500_000:
+            issues.append({
+                "code": "STITCH_COUNT_HIGH",
+                "message": (
+                    f"{total_stitches:,} pontos — pode exceder o limite de algumas máquinas (500K). "
+                    "Reduza o tamanho do design ou o número de cores."
+                ),
+                "severity": "warning",
+            })
+
+        if fmt == "PES" and (len(file_bytes) < 4 or file_bytes[:4] != b"#PES"):
+            issues.append({
+                "code": "PES_MAGIC_INVALID",
+                "message": "Arquivo .PES gerado sem cabeçalho correto (#PES). O arquivo pode estar corrompido.",
+                "severity": "error",
+            })
+
+        has_error = any(i["severity"] == "error" for i in issues)
+        has_warning = any(i["severity"] == "warning" for i in issues)
+        overall = "error" if has_error else ("warning" if has_warning else "ok")
+
+        return {"severity": overall, "issues": issues}
+
+
+# ── Fill algorithms ────────────────────────────────────────────────────────────
+
+
+def _tatami_fill(
+    color_mask: np.ndarray,
+    stitch_spacing_px: int,
+    angle_deg: float = 45.0,
+) -> list[float]:
+    """
+    Generate tatami-style diagonal fill stitches (boustrophedon).
+
+    Rotates the mask so fill lines align with the horizontal axis, then scans
+    row-by-row alternating direction. Result: connected diagonal zigzag instead
+    of the striped look produced by independent horizontal scanlines.
+    """
+    h, w = color_mask.shape
+    if not color_mask.any():
+        return []
+
+    cx, cy = w / 2.0, h / 2.0
+
+    rot_mat = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
+    inv_rot = cv2.getRotationMatrix2D((cx, cy), -angle_deg, 1.0)
+
+    rotated = cv2.warpAffine(
+        color_mask.astype(np.uint8) * 255,
+        rot_mat,
+        (w, h),
+        flags=cv2.INTER_NEAREST,
+    )
+
+    path_points: list[float] = []
+    flip = False
+
+    for y in range(0, h, stitch_spacing_px):
+        row = rotated[y]
+        xs_valid = np.where(row > 127)[0]
+        if len(xs_valid) == 0:
+            continue
+
+        # Split connected x-runs to avoid stitching over transparent gaps
+        runs = _split_runs(xs_valid, stitch_spacing_px * 3)
+
+        for xs_run in runs:
+            sampled = xs_run[::stitch_spacing_px]
+            if flip:
+                sampled = sampled[::-1]
+
+            for x in sampled:
+                # Back-project to original image coordinates
+                x_orig = inv_rot[0, 0] * x + inv_rot[0, 1] * y + inv_rot[0, 2]
+                y_orig = inv_rot[1, 0] * x + inv_rot[1, 1] * y + inv_rot[1, 2]
+                xi, yi = int(round(x_orig)), int(round(y_orig))
+
+                if 0 <= xi < w and 0 <= yi < h:
+                    path_points.extend([float(xi), float(yi)])
+
+        flip = not flip
+
+    return path_points
+
+
+def _trace_outline(
+    color_mask: np.ndarray,
+    stitch_spacing_px: int,
+) -> list[float]:
+    """
+    Trace the outer contour of a color region as running stitches.
+
+    Samples the contour at stitch_spacing_px intervals so the resulting
+    stitches match the fill density.
+    """
+    mask_u8 = color_mask.astype(np.uint8) * 255
+
+    # Dilate slightly so the outline sits just outside the fill
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask_u8 = cv2.dilate(mask_u8, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    path_points: list[float] = []
+
+    for contour in contours:
+        if len(contour) < 2:
+            continue
+
+        pts = contour.reshape(-1, 2)
+        prev = pts[0].astype(float)
+        path_points.extend([float(pts[0][0]), float(pts[0][1])])
+        accumulated = 0.0
+
+        for pt in pts[1:]:
+            pt_f = pt.astype(float)
+            accumulated += float(np.linalg.norm(pt_f - prev))
+            if accumulated >= stitch_spacing_px:
+                path_points.extend([float(pt[0]), float(pt[1])])
+                accumulated = 0.0
+            prev = pt_f
+
+        # Close the contour
+        if len(path_points) >= 2:
+            path_points.extend([float(pts[0][0]), float(pts[0][1])])
+
+    return path_points
+
+
+def _split_runs(xs: np.ndarray, max_gap: int) -> list[np.ndarray]:
+    """Split a sorted array of x-coords into contiguous runs separated by gaps > max_gap."""
+    if len(xs) == 0:
+        return []
+
+    splits = np.where(np.diff(xs) > max_gap)[0] + 1
+    return np.split(xs, splits)
 
 
 def _stitch_length_for_density(density: float) -> float:

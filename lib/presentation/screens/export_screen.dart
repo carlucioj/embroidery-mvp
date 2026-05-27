@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../application/workflow/workflow_bloc.dart';
 import '../../core/constants.dart';
 import '../../domain/interfaces/export_manager.dart';
+import '../../domain/models/embroidery_design.dart';
 import '../../domain/models/workflow_state.dart';
 import '../../infrastructure/export/desktop_export_manager.dart';
 import '../../infrastructure/export/mobile_export_manager.dart';
@@ -147,15 +148,21 @@ class _ExportScreenState extends State<ExportScreen> {
                 const SizedBox(height: 24),
 
                 // Design summary card
-                if (design != null && params != null)
+                if (design != null && params != null) ...[
                   _DesignSummaryCard(
                     stitchCount: design.metrics.totalStitches,
                     colorCount: design.colors.length,
                     widthMm: design.metrics.widthMm,
                     heightMm: design.metrics.heightMm,
+                    estimatedMinutes: design.metrics.estimatedMinutes,
                     format: params.outputFormat.extension,
                     manufacturer: params.outputFormat.manufacturer,
                   ),
+                  if (design.validation != null) ...[
+                    const SizedBox(height: 12),
+                    _ValidationCard(validation: design.validation!),
+                  ],
+                ],
 
                 const SizedBox(height: 24),
 
@@ -181,10 +188,13 @@ class _ExportScreenState extends State<ExportScreen> {
                     const SizedBox(height: 16),
                   ],
 
-                  // Export button
+                  // Export button — blocked if validation has errors
                   FilledButton.icon(
-                    onPressed:
-                        _isExporting || design == null ? null : () => _export(state),
+                    onPressed: _isExporting ||
+                            design == null ||
+                            design.validation?.isExportable == false
+                        ? null
+                        : () => _export(state),
                     icon: _isExporting
                         ? const SizedBox(
                             width: 18,
@@ -261,6 +271,7 @@ class _DesignSummaryCard extends StatelessWidget {
     required this.colorCount,
     required this.widthMm,
     required this.heightMm,
+    required this.estimatedMinutes,
     required this.format,
     required this.manufacturer,
   });
@@ -269,8 +280,17 @@ class _DesignSummaryCard extends StatelessWidget {
   final int colorCount;
   final double widthMm;
   final double heightMm;
+  final double estimatedMinutes;
   final String format;
   final String manufacturer;
+
+  String get _estimatedTime {
+    if (estimatedMinutes < 1) return 'menos de 1 min';
+    final h = estimatedMinutes ~/ 60;
+    final m = (estimatedMinutes % 60).round();
+    if (h == 0) return '$m min';
+    return '${h}h ${m}min';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -292,6 +312,7 @@ class _DesignSummaryCard extends StatelessWidget {
               value:
                   '${widthMm.toStringAsFixed(0)} × ${heightMm.toStringAsFixed(0)} mm',
             ),
+            _Row(label: 'Tempo estimado', value: _estimatedTime),
             _Row(
               label: 'Formato',
               value: '.$format — $manufacturer',
@@ -324,6 +345,119 @@ class _Row extends StatelessWidget {
           Text(value,
               style: theme.textTheme.bodyMedium
                   ?.copyWith(fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ValidationCard extends StatelessWidget {
+  const _ValidationCard({required this.validation});
+
+  final DesignValidation validation;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (!validation.hasIssues) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade300),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_outline, color: Colors.green.shade700, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Design validado — pronto para exportar.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.green.shade800,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final isError = validation.severity == ValidationSeverity.error;
+    final color = isError ? theme.colorScheme.error : Colors.orange.shade700;
+    final bgColor = isError
+        ? theme.colorScheme.errorContainer
+        : Colors.orange.withValues(alpha: 0.1);
+    final borderColor = isError ? theme.colorScheme.error : Colors.orange.shade300;
+    final icon = isError ? Icons.error_outline : Icons.warning_amber_outlined;
+    final title = isError ? 'Problemas bloqueando exportação' : 'Avisos do design';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...validation.issues.map(
+            (issue) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    issue.severity == ValidationSeverity.error
+                        ? Icons.cancel_outlined
+                        : Icons.info_outline,
+                    size: 16,
+                    color: issue.severity == ValidationSeverity.error
+                        ? theme.colorScheme.error
+                        : Colors.orange.shade700,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      issue.message,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isError
+                            ? theme.colorScheme.onErrorContainer
+                            : Colors.orange.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isError)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Corrija os erros acima antes de exportar.',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
         ],
       ),
     );
