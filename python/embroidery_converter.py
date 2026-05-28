@@ -38,10 +38,15 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Supported output formats
+# Formats confirmed writable by pyembroidery 1.5.1.
+# HUS, VIP, SEW, CSD, EMB, OFM raise IOError on write — not supported.
 SUPPORTED_FORMATS = {
-    "DST", "PES", "JEF", "EXP", "HUS", "VIP",
-    "VP3", "XXX", "SEW", "CSD", "EMB", "OFM",
+    "DST",  # Tajima — padrão industrial mundial
+    "PES",  # Brother / Babylock
+    "JEF",  # Janome
+    "EXP",  # Melco / Bernina
+    "VP3",  # Husqvarna Viking / Pfaff
+    "XXX",  # Singer
 }
 
 # Fabric stitch density (stitches per mm²) — midpoint of each range
