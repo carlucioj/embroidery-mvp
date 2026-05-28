@@ -69,6 +69,7 @@ def run_http_server_mode(host: str, port: int) -> None:
     async def process_image(
         image: UploadFile = File(...),
         max_colors: int = Form(default=8),
+        remove_background: bool = Form(default=True, alias="removeBackground"),
     ):
         """
         Remove background and reduce colors from an uploaded image.
@@ -80,6 +81,7 @@ def run_http_server_mode(host: str, port: int) -> None:
             result = processor.process_image(
                 image_bytes=image_bytes,
                 max_colors=max_colors,
+                remove_background=remove_background,
             )
             return Response(
                 content=result,
@@ -104,15 +106,13 @@ def run_http_server_mode(host: str, port: int) -> None:
         width_mm: float = Form(..., alias="widthMm"),
         height_mm: float = Form(..., alias="heightMm"),
         fabric_id: str = Form(..., alias="fabricId"),
+        stitch_type: str = Form(default="fill", alias="stitchType"),
     ):
         """
         Convert a processed image to an embroidery file.
 
-        Returns JSON with:
-        - fileBytes: base64-encoded embroidery file
-        - totalStitches: int
-        - colorChanges: int
-        - estimatedMinutes: float
+        Returns JSON with fileBytes (base64), totalStitches, colorChanges,
+        estimatedMinutes, colors, stitchPaths, colorChangesList, validation.
         """
         try:
             image_bytes = await image.read()
@@ -122,12 +122,17 @@ def run_http_server_mode(host: str, port: int) -> None:
                 width_mm=width_mm,
                 height_mm=height_mm,
                 fabric_id=fabric_id,
+                stitch_type=stitch_type,
             )
             return JSONResponse(content={
                 "fileBytes": base64.b64encode(result["file_bytes"]).decode(),
                 "totalStitches": result["total_stitches"],
                 "colorChanges": result["color_changes"],
                 "estimatedMinutes": result["estimated_minutes"],
+                "colors": result["colors"],
+                "stitchPaths": result["stitch_paths"],
+                "colorChangesList": result["color_changes_list"],
+                "validation": result["validation"],
             })
         except ValueError as e:
             return JSONResponse(

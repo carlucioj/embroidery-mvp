@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants.dart';
+import '../../domain/models/image_data.dart';
 
 /// HTTP client for the remote processing API.
 ///
@@ -24,28 +25,23 @@ class ProcessingApiClient {
 
   /// Upload and process an image remotely.
   ///
-  /// [imageBytes] - Raw image bytes
-  /// [filename] - Original filename (for content type detection)
-  /// [maxColors] - Maximum colors after reduction
-  /// [onProgress] - Optional progress callback (0.0 to 1.0)
-  ///
-  /// Returns processed image bytes as PNG.
-  Future<Uint8List> processImage({
+  /// Returns [ProcessingApiResult] with image bytes, dominant colors, and complexity.
+  Future<ProcessingApiResult> processImage({
     required Uint8List imageBytes,
     required String filename,
     int maxColors = ProcessingConfig.maxColors,
+    bool removeBackground = true,
+    String mode = 'basic',
     void Function(double progress)? onProgress,
   }) async {
     return _withRetry(() async {
       final uri = Uri.parse('$_baseUrl/process-image');
       final request = http.MultipartRequest('POST', uri)
         ..fields['maxColors'] = maxColors.toString()
+        ..fields['removeBackground'] = removeBackground.toString()
+        ..fields['mode'] = mode
         ..files.add(
-          http.MultipartFile.fromBytes(
-            'image',
-            imageBytes,
-            filename: filename,
-          ),
+          http.MultipartFile.fromBytes('image', imageBytes, filename: filename),
         );
 
       onProgress?.call(0.1);
@@ -66,7 +62,21 @@ class ProcessingApiClient {
       }
 
       onProgress?.call(1.0);
-      return response.bodyBytes;
+
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final imageBase64 = json['imageBase64'] as String;
+      final rawColors = (json['dominantColors'] as List? ?? [])
+          .map((c) => (c as num).toInt())
+          .toList();
+      final complexityJson = json['complexity'] as Map<String, dynamic>?;
+
+      return ProcessingApiResult(
+        imageBytes: base64Decode(imageBase64),
+        dominantColors: rawColors,
+        complexity: complexityJson != null
+            ? ImageComplexity.fromJson(complexityJson)
+            : null,
+      );
     });
   }
 
@@ -80,6 +90,7 @@ class ProcessingApiClient {
     required double widthMm,
     required double heightMm,
     required String fabricId,
+    String stitchType = 'fill',
     void Function(double progress)? onProgress,
   }) async {
     return _withRetry(() async {
@@ -89,6 +100,7 @@ class ProcessingApiClient {
         ..fields['widthMm'] = widthMm.toString()
         ..fields['heightMm'] = heightMm.toString()
         ..fields['fabricId'] = fabricId
+        ..fields['stitchType'] = stitchType
         ..files.add(
           http.MultipartFile.fromBytes(
             'image',
@@ -150,6 +162,19 @@ class ProcessingApiClient {
 
   /// Close the HTTP client and release resources.
   void dispose() => _client.close();
+}
+
+/// Result of a remote processImage call.
+class ProcessingApiResult {
+  const ProcessingApiResult({
+    required this.imageBytes,
+    required this.dominantColors,
+    this.complexity,
+  });
+
+  final Uint8List imageBytes;
+  final List<int> dominantColors;
+  final ImageComplexity? complexity;
 }
 
 /// Exception thrown when the API returns an error response.

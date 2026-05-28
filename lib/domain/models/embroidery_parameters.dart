@@ -1,5 +1,29 @@
 import '../../core/constants.dart';
 
+/// How the embroidery fill is rendered for each color region.
+enum StitchType {
+  fill,     // diagonal tatami fill (45°) + contour outline
+  outline,  // running stitch along the boundary only
+  satin;    // dense horizontal fill (boustrophedon at 0°), no outline
+
+  String get id => name;
+
+  String get label => switch (this) {
+        StitchType.fill => 'Preenchimento',
+        StitchType.outline => 'Contorno',
+        StitchType.satin => 'Satim',
+      };
+
+  String get description => switch (this) {
+        StitchType.fill =>
+          'Preenche a área com linhas diagonais em zigue-zague (tatami). Ideal para grandes regiões.',
+        StitchType.outline =>
+          'Traça apenas o contorno da forma em ponto de corrida. Ideal para linhas e bordas.',
+        StitchType.satin =>
+          'Linhas paralelas densas cobrindo a forma. Ideal para letras e formas estreitas.',
+      };
+}
+
 /// Parameters that define how an embroidery design will be generated.
 class EmbroideryParameters {
   const EmbroideryParameters({
@@ -8,6 +32,7 @@ class EmbroideryParameters {
     required this.designWidthMm,
     required this.designHeightMm,
     required this.outputFormat,
+    this.stitchType = StitchType.fill,
     this.maintainAspectRatio = true,
   });
 
@@ -25,6 +50,9 @@ class EmbroideryParameters {
 
   /// Output file format (e.g., 'DST', 'PES')
   final EmbroideryFormat outputFormat;
+
+  /// How stitches are generated for each color region
+  final StitchType stitchType;
 
   /// Whether to maintain aspect ratio when resizing
   final bool maintainAspectRatio;
@@ -134,6 +162,7 @@ class EmbroideryParameters {
     double? designWidthMm,
     double? designHeightMm,
     EmbroideryFormat? outputFormat,
+    StitchType? stitchType,
     bool? maintainAspectRatio,
   }) {
     return EmbroideryParameters(
@@ -142,7 +171,47 @@ class EmbroideryParameters {
       designWidthMm: designWidthMm ?? this.designWidthMm,
       designHeightMm: designHeightMm ?? this.designHeightMm,
       outputFormat: outputFormat ?? this.outputFormat,
+      stitchType: stitchType ?? this.stitchType,
       maintainAspectRatio: maintainAspectRatio ?? this.maintainAspectRatio,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'hoopId': hoop.id,
+        'fabricId': fabric.id,
+        'designWidthMm': designWidthMm,
+        'designHeightMm': designHeightMm,
+        'outputFormat': outputFormat.extension,
+        'stitchType': stitchType.id,
+        'maintainAspectRatio': maintainAspectRatio,
+      };
+
+  factory EmbroideryParameters.fromJson(Map<String, dynamic> json) {
+    final hoopId = json['hoopId'] as String;
+    final fabricId = json['fabricId'] as String;
+    final formatExt = json['outputFormat'] as String;
+    final stitchTypeId = json['stitchType'] as String? ?? 'fill';
+
+    return EmbroideryParameters(
+      hoop: HoopSizes.all.firstWhere(
+        (h) => h.id == hoopId,
+        orElse: () => HoopSizes.rectangular.first,
+      ),
+      fabric: FabricTypes.all.firstWhere(
+        (f) => f.id == fabricId,
+        orElse: () => FabricTypes.cotton,
+      ),
+      designWidthMm: (json['designWidthMm'] as num).toDouble(),
+      designHeightMm: (json['designHeightMm'] as num).toDouble(),
+      outputFormat: OutputFormats.all.firstWhere(
+        (f) => f.extension == formatExt,
+        orElse: () => OutputFormats.all.first,
+      ),
+      stitchType: StitchType.values.firstWhere(
+        (s) => s.id == stitchTypeId,
+        orElse: () => StitchType.fill,
+      ),
+      maintainAspectRatio: json['maintainAspectRatio'] as bool? ?? true,
     );
   }
 
@@ -150,5 +219,5 @@ class EmbroideryParameters {
   String toString() =>
       'EmbroideryParameters(hoop: ${hoop.label}, fabric: ${fabric.label}, '
       'size: ${designWidthMm.toStringAsFixed(1)}x${designHeightMm.toStringAsFixed(1)} mm, '
-      'format: .${outputFormat.extension})';
+      'format: .${outputFormat.extension}, stitch: ${stitchType.id})';
 }

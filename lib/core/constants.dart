@@ -21,6 +21,13 @@ class PrefsKeys {
   static const String lastHoopSize = 'last_hoop_size';
   static const String workflowState = 'workflow_state';
   static const String pendingFeedback = 'pending_feedback';
+
+  // Session persistence keys
+  static const String workflowHasSession = 'workflow_has_session';
+  static const String workflowCurrentStep = 'workflow_step';
+  static const String workflowCapturedMeta = 'workflow_captured_meta';
+  static const String workflowCleanedMeta = 'workflow_cleaned_meta';
+  static const String workflowParameters = 'workflow_parameters';
 }
 
 /// Supported image formats for import
@@ -54,19 +61,15 @@ class SupportedFormats {
 class OutputFormats {
   OutputFormats._();
 
+  // Formatos confirmados pelo pyembroidery 1.5.1 (write support verificado).
+  // HUS, VIP, SEW, CSD, EMB, OFM foram removidos: lançam IOError na escrita.
   static const List<EmbroideryFormat> all = [
     EmbroideryFormat(extension: 'DST', manufacturer: 'Tajima'),
     EmbroideryFormat(extension: 'PES', manufacturer: 'Brother / Babylock'),
     EmbroideryFormat(extension: 'JEF', manufacturer: 'Janome'),
     EmbroideryFormat(extension: 'EXP', manufacturer: 'Melco / Bernina'),
-    EmbroideryFormat(extension: 'HUS', manufacturer: 'Husqvarna Viking'),
-    EmbroideryFormat(extension: 'VIP', manufacturer: 'Husqvarna Viking / Pfaff'),
     EmbroideryFormat(extension: 'VP3', manufacturer: 'Husqvarna Viking / Pfaff'),
     EmbroideryFormat(extension: 'XXX', manufacturer: 'Singer'),
-    EmbroideryFormat(extension: 'SEW', manufacturer: 'Elna / Janome'),
-    EmbroideryFormat(extension: 'CSD', manufacturer: 'Poem / Singer / Husqvarna'),
-    EmbroideryFormat(extension: 'EMB', manufacturer: 'Wilcom'),
-    EmbroideryFormat(extension: 'OFM', manufacturer: 'Barudan'),
   ];
 }
 

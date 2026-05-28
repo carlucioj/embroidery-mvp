@@ -1,28 +1,34 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
 
+import '../../core/server_config.dart';
 import '../../domain/interfaces/embroidery_converter.dart';
 import '../../domain/models/embroidery_design.dart';
 import '../../domain/models/embroidery_parameters.dart';
 import '../../domain/models/image_data.dart';
+import '../http/processing_api_client.dart';
 import '../python/python_bridge.dart';
 import 'color_mapper.dart';
 
 /// Embroidery converter that uses the Python/pyembroidery backend.
 ///
-/// Communicates with Python via MethodChannel on Desktop,
-/// or via HTTP API on Mobile (through the bridge abstraction).
+/// Tries the HTTP API server first (api_server.py), then falls back to the
+/// MethodChannel bridge (requires a native Windows plugin).
 class PyEmbroideryConverter implements EmbroideryConverter {
   PyEmbroideryConverter({
     PythonBridge? bridge,
     ColorMapper? colorMapper,
+    ProcessingApiClient? apiClient,
   })  : _bridge = bridge ?? PythonBridge(),
-        _colorMapper = colorMapper ?? ColorMapper();
+        _colorMapper = colorMapper ?? ColorMapper(),
+        _apiClient = apiClient ?? ProcessingApiClient();
 
   final PythonBridge _bridge;
   final ColorMapper _colorMapper;
+  final ProcessingApiClient _apiClient;
   final _progressController = StreamController<ConversionProgress>.broadcast();
   bool _cancelled = false;
   static const _uuid = Uuid();
@@ -31,9 +37,8 @@ class PyEmbroideryConverter implements EmbroideryConverter {
   Stream<ConversionProgress> get progressStream => _progressController.stream;
 
   @override
-  List<String> validateParameters(EmbroideryParameters params) {
-    return params.validate();
-  }
+  List<String> validateParameters(EmbroideryParameters params) =>
+      params.validate();
 
   @override
   Future<EmbroideryDesign> convertToEmbroidery(
@@ -48,91 +53,170 @@ class PyEmbroideryConverter implements EmbroideryConverter {
     }
 
     _emitProgress(0.05, 'Preparando conversão...');
-
     if (_cancelled) throw const EmbroideryConversionException('Conversão cancelada.');
 
+    // Attempt 1: HTTP server (api_server.py running locally)
+    final serverOk = await ServerConfig.checkHealth();
+    if (serverOk) {
+      try {
+        return await _convertViaHttpApi(image, parameters);
+      } catch (e) {
+        if (e is EmbroideryConversionException) rethrow;
+        // If HTTP failed for non-auth/validation reason, try bridge next
+      }
+    }
+
+    // Attempt 2: MethodChannel bridge (native Windows plugin)
     try {
-      _emitProgress(0.1, 'Convertendo para bordado...');
-
-      final result = await _bridge.convertToEmbroidery(
-        imageBytes: image.bytes,
-        format: parameters.outputFormat.extension,
-        widthMm: parameters.designWidthMm,
-        heightMm: parameters.designHeightMm,
-        fabricId: parameters.fabric.id,
-      );
-
-      if (_cancelled) throw const EmbroideryConversionException('Conversão cancelada.');
-
-      _emitProgress(0.7, 'Mapeando cores...');
-
-      // Map colors from the result
-      final rawColors = (result['colors'] as List? ?? [])
-          .map((c) => c as int)
-          .toList();
-
-      final mappedColors = await _colorMapper.mapColors(rawColors);
-
-      _emitProgress(0.85, 'Gerando pré-visualização...');
-
-      final fileBytes = result['fileBytes'] as Uint8List;
-      final totalStitches = result['totalStitches'] as int? ?? 0;
-      final colorChanges = result['colorChanges'] as int? ?? 0;
-      final estimatedMinutes = (result['estimatedMinutes'] as num?)?.toDouble() ?? 0.0;
-
-      // Build stitch paths from result
-      final rawPaths = (result['stitchPaths'] as List? ?? []);
-      final stitchPaths = rawPaths.map((p) {
-        final map = p as Map<dynamic, dynamic>;
-        return StitchPath(
-          colorIndex: map['colorIndex'] as int,
-          stitchCount: map['stitchCount'] as int,
-          points: (map['points'] as List).map((v) => (v as num).toDouble()).toList(),
-        );
-      }).toList();
-
-      // Build color changes from result
-      final rawChanges = (result['colorChanges'] as List? ?? []);
-      final colorChangeList = rawChanges.map((c) {
-        final map = c as Map<dynamic, dynamic>;
-        return ColorChange(
-          stitchIndex: map['stitchIndex'] as int,
-          fromColorIndex: map['fromColorIndex'] as int,
-          toColorIndex: map['toColorIndex'] as int,
-        );
-      }).toList();
-
-      final metrics = DesignMetrics(
-        totalStitches: totalStitches,
-        colorChangeCount: colorChanges,
-        widthMm: parameters.designWidthMm,
-        heightMm: parameters.designHeightMm,
-        estimatedMinutes: estimatedMinutes,
-      );
-
-      _emitProgress(1.0, 'Bordado gerado com sucesso!');
-
-      return EmbroideryDesign(
-        id: _uuid.v4(),
-        created: DateTime.now(),
-        stitchPaths: stitchPaths,
-        colorChanges: colorChangeList,
-        colors: mappedColors,
-        metrics: metrics,
-        fileBytes: fileBytes,
-      );
-    } on PythonBridgeException catch (e) {
-      throw EmbroideryConversionException(
-        'Falha ao gerar bordado. Verifique os parâmetros e tente novamente.',
-        cause: e,
+      return await _convertViaBridge(image, parameters);
+    } on PythonBridgeException {
+      throw const EmbroideryConversionException(
+        'O servidor Python não está disponível.\n'
+        'Inicie o servidor com INICIAR_SERVIDOR.bat e tente novamente.',
       );
     }
   }
 
+  Future<EmbroideryDesign> _convertViaHttpApi(
+    ProcessedImage image,
+    EmbroideryParameters parameters,
+  ) async {
+    _emitProgress(0.1, 'Convertendo via servidor...');
+
+    final result = await _apiClient.convertToEmbroidery(
+      imageBytes: image.bytes,
+      format: parameters.outputFormat.extension,
+      widthMm: parameters.designWidthMm,
+      heightMm: parameters.designHeightMm,
+      fabricId: parameters.fabric.id,
+      stitchType: parameters.stitchType.id,
+      onProgress: (p) => _emitProgress(0.1 + p * 0.6, 'Gerando pontos...'),
+    );
+
+    if (_cancelled) throw const EmbroideryConversionException('Conversão cancelada.');
+    return _buildDesign(result, parameters);
+  }
+
+  Future<EmbroideryDesign> _convertViaBridge(
+    ProcessedImage image,
+    EmbroideryParameters parameters,
+  ) async {
+    _emitProgress(0.1, 'Convertendo via Python local...');
+
+    final result = await _bridge.convertToEmbroidery(
+      imageBytes: image.bytes,
+      format: parameters.outputFormat.extension,
+      widthMm: parameters.designWidthMm,
+      heightMm: parameters.designHeightMm,
+      fabricId: parameters.fabric.id,
+      stitchType: parameters.stitchType.id,
+    );
+
+    if (_cancelled) throw const EmbroideryConversionException('Conversão cancelada.');
+    return _buildDesign(result, parameters);
+  }
+
+  Future<EmbroideryDesign> _buildDesign(
+    Map<String, dynamic> result,
+    EmbroideryParameters parameters,
+  ) async {
+    _emitProgress(0.7, 'Mapeando cores das linhas...');
+
+    final rawColors =
+        (result['colors'] as List? ?? []).map((c) => c as int).toList();
+    final mappedColors = await _colorMapper.mapColors(rawColors);
+
+    _emitProgress(0.85, 'Finalizando design...');
+
+    // HTTP path: ProcessingApiClient already decoded base64 → Uint8List.
+    // MethodChannel path: method_channel_handler returns base64 String.
+    // Handle both so the bridge path works if/when the native plugin is wired.
+    final rawFileBytes = result['fileBytes'];
+    final Uint8List fileBytes;
+    if (rawFileBytes is Uint8List) {
+      fileBytes = rawFileBytes;
+    } else {
+      fileBytes = base64Decode(rawFileBytes as String);
+    }
+    final totalStitches = result['totalStitches'] as int? ?? 0;
+    final colorChangeCount = result['colorChanges'] as int? ?? 0;
+    final estimatedMinutes =
+        (result['estimatedMinutes'] as num?)?.toDouble() ?? 0.0;
+
+    final rawPaths = result['stitchPaths'] as List? ?? [];
+    final stitchPaths = rawPaths.map((p) {
+      final map = p as Map<dynamic, dynamic>;
+      return StitchPath(
+        colorIndex: map['colorIndex'] as int,
+        stitchCount: map['stitchCount'] as int,
+        points: (map['points'] as List)
+            .map((v) => (v as num).toDouble())
+            .toList(),
+      );
+    }).toList();
+
+    // colorChangesList (list of events) vs colorChanges (int count)
+    final rawChanges = result['colorChangesList'] as List? ?? [];
+    final colorChanges = rawChanges.map((c) {
+      final map = c as Map<dynamic, dynamic>;
+      return ColorChange(
+        stitchIndex: map['stitchIndex'] as int,
+        fromColorIndex: map['fromColorIndex'] as int,
+        toColorIndex: map['toColorIndex'] as int,
+      );
+    }).toList();
+
+    final metrics = DesignMetrics(
+      totalStitches: totalStitches,
+      colorChangeCount: colorChangeCount,
+      widthMm: parameters.designWidthMm,
+      heightMm: parameters.designHeightMm,
+      estimatedMinutes: estimatedMinutes,
+    );
+
+    // Parse validation (handles both Map<String, dynamic> from HTTP and
+    // Map<dynamic, dynamic> from MethodChannel bridge)
+    final rawValidation = result['validation'];
+    DesignValidation? validation;
+    if (rawValidation is Map) {
+      final issues = (rawValidation['issues'] as List? ?? []).map((e) {
+        final im = e as Map;
+        return ValidationIssue(
+          code: im['code'] as String,
+          message: im['message'] as String,
+          severity: switch (im['severity'] as String) {
+            'error' => ValidationSeverity.error,
+            'warning' => ValidationSeverity.warning,
+            _ => ValidationSeverity.ok,
+          },
+        );
+      }).toList();
+      validation = DesignValidation(
+        severity: switch (rawValidation['severity'] as String) {
+          'error' => ValidationSeverity.error,
+          'warning' => ValidationSeverity.warning,
+          _ => ValidationSeverity.ok,
+        },
+        issues: issues,
+      );
+    }
+
+    _emitProgress(1.0, 'Bordado gerado com sucesso!');
+
+    return EmbroideryDesign(
+      id: _uuid.v4(),
+      created: DateTime.now(),
+      stitchPaths: stitchPaths,
+      colorChanges: colorChanges,
+      colors: mappedColors,
+      metrics: metrics,
+      fileBytes: fileBytes,
+      validation: validation,
+    );
+  }
+
   @override
   Future<PreviewData> generatePreview(EmbroideryDesign design) async {
-    // Generate a simple preview from the stitch paths
-    // In a real implementation this would render the paths to a canvas
     return PreviewData(
       previewBytes: design.fileBytes ?? Uint8List(0),
       widthPx: 400,
@@ -141,25 +225,17 @@ class PyEmbroideryConverter implements EmbroideryConverter {
   }
 
   @override
-  DesignMetrics calculateMetrics(EmbroideryDesign design) {
-    return design.metrics;
-  }
+  DesignMetrics calculateMetrics(EmbroideryDesign design) => design.metrics;
 
   @override
-  Future<void> cancel() async {
-    _cancelled = true;
-  }
+  Future<void> cancel() async => _cancelled = true;
 
   void _emitProgress(double percentage, String stage) {
     if (!_progressController.isClosed) {
-      _progressController.add(ConversionProgress(
-        percentage: percentage,
-        stage: stage,
-      ));
+      _progressController.add(
+          ConversionProgress(percentage: percentage, stage: stage));
     }
   }
 
-  void dispose() {
-    _progressController.close();
-  }
+  void dispose() => _progressController.close();
 }

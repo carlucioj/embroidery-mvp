@@ -12,7 +12,9 @@ class StitchPath {
   factory StitchPath.fromJson(Map<String, dynamic> json) => StitchPath(
         colorIndex: json['colorIndex'] as int,
         stitchCount: json['stitchCount'] as int,
-        points: (json['points'] as List).cast<double>(),
+        points: (json['points'] as List)
+            .map((v) => (v as num).toDouble())
+            .toList(),
       );
 
   /// Index into the design's color list
@@ -168,6 +170,71 @@ class DesignMetrics {
       };
 }
 
+/// Severity level of a validation result
+enum ValidationSeverity { ok, warning, error }
+
+/// A single validation issue found in the design
+class ValidationIssue {
+  const ValidationIssue({
+    required this.code,
+    required this.message,
+    required this.severity,
+  });
+
+  factory ValidationIssue.fromJson(Map<String, dynamic> json) => ValidationIssue(
+        code: json['code'] as String,
+        message: json['message'] as String,
+        severity: switch (json['severity'] as String) {
+          'error' => ValidationSeverity.error,
+          'warning' => ValidationSeverity.warning,
+          _ => ValidationSeverity.ok,
+        },
+      );
+
+  final String code;
+  final String message;
+  final ValidationSeverity severity;
+
+  Map<String, dynamic> toJson() => {
+        'code': code,
+        'message': message,
+        'severity': severity.name,
+      };
+}
+
+/// Aggregated validation result for a generated design
+class DesignValidation {
+  const DesignValidation({
+    required this.severity,
+    required this.issues,
+  });
+
+  factory DesignValidation.fromJson(Map<String, dynamic> json) =>
+      DesignValidation(
+        severity: switch (json['severity'] as String) {
+          'error' => ValidationSeverity.error,
+          'warning' => ValidationSeverity.warning,
+          _ => ValidationSeverity.ok,
+        },
+        issues: (json['issues'] as List)
+            .map((e) => ValidationIssue.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  final ValidationSeverity severity;
+  final List<ValidationIssue> issues;
+
+  /// Whether the file can be exported (no blocking errors)
+  bool get isExportable => severity != ValidationSeverity.error;
+
+  bool get hasIssues => issues.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'severity': severity.name,
+        'issues': issues.map((i) => i.toJson()).toList(),
+      };
+}
+
 /// Preview data for rendering stitch paths on screen
 class PreviewData {
   const PreviewData({
@@ -197,6 +264,7 @@ class EmbroideryDesign {
     required this.metrics,
     this.previewData,
     this.fileBytes,
+    this.validation,
   });
 
   factory EmbroideryDesign.fromJson(Map<String, dynamic> json) =>
@@ -213,6 +281,10 @@ class EmbroideryDesign {
             .map((e) => ThreadColor.fromJson(e as Map<String, dynamic>))
             .toList(),
         metrics: DesignMetrics.fromJson(json['metrics'] as Map<String, dynamic>),
+        validation: json['validation'] != null
+            ? DesignValidation.fromJson(
+                json['validation'] as Map<String, dynamic>)
+            : null,
       );
 
   factory EmbroideryDesign.fromJsonString(String jsonString) =>
@@ -244,6 +316,9 @@ class EmbroideryDesign {
   /// Raw embroidery file bytes (null until exported)
   final Uint8List? fileBytes;
 
+  /// Validation result from the Python backend (null if not yet validated)
+  final DesignValidation? validation;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'created': created.toIso8601String(),
@@ -251,6 +326,7 @@ class EmbroideryDesign {
         'colorChanges': colorChanges.map((c) => c.toJson()).toList(),
         'colors': colors.map((c) => c.toJson()).toList(),
         'metrics': metrics.toJson(),
+        if (validation != null) 'validation': validation!.toJson(),
       };
 
   /// Serialize to JSON string

@@ -21,9 +21,15 @@ class DesktopExportManager implements ExportManager {
 
   @override
   Future<ExportDestination?> selectDestination(String suggestedFilename) async {
+    // Extract the extension so the Windows save dialog filters by file type.
+    // path.extension returns ".pes", we need "pes" (no dot, lowercase).
+    final ext = path.extension(suggestedFilename).replaceAll('.', '').toLowerCase();
+
     final result = await FilePicker.platform.saveFile(
       dialogTitle: 'Salvar arquivo de bordado',
       fileName: suggestedFilename,
+      allowedExtensions: ext.isNotEmpty ? [ext] : null,
+      type: ext.isNotEmpty ? FileType.custom : FileType.any,
     );
 
     if (result == null) return null;

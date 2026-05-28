@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'application/workflow/workflow_persistence.dart';
 import 'core/server_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load saved preferences
   final prefs = await SharedPreferences.getInstance();
-
-  // Load server URL configuration
   await ServerConfig.load();
 
-  runApp(EmbroideryApp(prefs: prefs));
+  // Restore last session from disk (null if no session or restore fails)
+  final persistence = WorkflowPersistence(prefs: prefs);
+  final initialState = await persistence.loadWorkflowState();
+
+  runApp(EmbroideryApp(prefs: prefs, initialWorkflowState: initialState));
 }

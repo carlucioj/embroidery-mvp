@@ -7,8 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../application/workflow/workflow_bloc.dart';
 import '../../core/app_router.dart';
 import '../../core/server_config.dart';
-import '../../domain/interfaces/image_processor.dart';
-import '../../domain/models/image_data.dart';
+import '../../domain/interfaces/image_processor.dart' show ImageProcessingException, ProcessingMode, ProcessingOptions, RefinementMode;
+import '../../domain/models/image_data.dart' show ComplexityLevel, ImageComplexity, ImageData, ProcessedImage;
 import '../../domain/models/workflow_state.dart';
 import '../../infrastructure/image/dart_image_processor.dart';
 import '../../infrastructure/image/remote_image_processor.dart';
@@ -16,13 +16,9 @@ import '../widgets/contextual_help_button.dart';
 
 /// Step 2: Image cleaning screen.
 ///
-/// Optional step. Tries the remote server first (rembg quality),
-/// falls back to pure-Dart processing if server is unavailable.
-///
-/// Options:
-///   - Remove background (on/off)
-///   - Number of colors (2–16)
-///   - Skip entirely
+/// Asks the user explicitly whether to remove the background, how many colors
+/// to use, and what to include/exclude from the final embroidery.
+/// Tries the remote server first (rembg quality), falls back to pure-Dart.
 class ImageCleaningScreen extends StatefulWidget {
   const ImageCleaningScreen({super.key});
 
@@ -31,20 +27,20 @@ class ImageCleaningScreen extends StatefulWidget {
 }
 
 class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
-  // Options
-  bool _removeBackground = true;
+  // ── User options ────────────────────────────────────────────────────────────
+  // Defaults to OFF — user must explicitly choose to remove background.
+  bool _removeBackground = false;
   int _maxColors = 8;
 
-  // State
+  // ── Processing state ────────────────────────────────────────────────────────
   bool _isProcessing = false;
   double _progress = 0;
   String _progressStage = '';
   String? _errorMessage;
   ProcessedImage? _result;
   bool _usedServer = false;
-
-  // Server status
   bool? _serverAvailable;
+  RefinementMode _refinementMode = RefinementMode.none;
 
   @override
   void initState() {
@@ -57,8 +53,9 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
     if (mounted) setState(() => _serverAvailable = ok);
   }
 
+  // ── Processing ──────────────────────────────────────────────────────────────
+
   Future<void> _cleanArt(ImageData image) async {
-    debugPrint('[CleanArt] Starting. serverAvailable=$_serverAvailable');
     setState(() {
       _isProcessing = true;
       _progress = 0;
@@ -68,53 +65,34 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
       _usedServer = false;
     });
 
-    // Try server first if available
+
     if (_serverAvailable == true) {
-      debugPrint('[CleanArt] Trying server...');
-      final success = await _tryServerProcessing(image);
-      if (success) {
-        debugPrint('[CleanArt] Server succeeded.');
-        return;
-      }
-      debugPrint('[CleanArt] Server failed, falling back to Dart.');
+      final ok = await _tryServerProcessing(image);
+      if (ok) return;
       setState(() => _progressStage = 'Servidor indisponível. Usando processamento local...');
-    } else {
-      debugPrint('[CleanArt] Server not available ($_serverAvailable), using Dart directly.');
     }
 
-    // Dart fallback
     await _dartProcessing(image);
   }
 
   Future<bool> _tryServerProcessing(ImageData image) async {
     final remote = RemoteImageProcessor();
     final sub = remote.progressStream.listen((p) {
-      if (mounted) {
-        setState(() {
-          _progress = p.percentage * 0.9;
-          _progressStage = '🌐 ${p.stage}';
-        });
-      }
+      if (mounted) setState(() { _progress = p.percentage * 0.9; _progressStage = p.stage; });
     });
-
     try {
-      setState(() => _progressStage = '🌐 Enviando para o servidor...');
-
+      setState(() => _progressStage = 'Enviando para o servidor...');
       final result = await remote.processImage(
         image,
         ProcessingOptions(
           removeBackground: _removeBackground,
           maxColors: _maxColors,
           mode: ProcessingMode.remote,
+          refinementMode: _refinementMode,
         ),
       );
-
       if (mounted) {
-        setState(() {
-          _isProcessing = false;
-          _result = result.processedImage;
-          _usedServer = true;
-        });
+        setState(() { _isProcessing = false; _result = result.processedImage; _usedServer = true; });
         context.read<WorkflowBloc>().add(WorkflowImageCleaned(result.processedImage));
       }
       return true;
@@ -127,18 +105,10 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
   }
 
   Future<void> _dartProcessing(ImageData image) async {
-    debugPrint('[CleanArt] Starting Dart processing...');
     final dart = DartImageProcessor();
     final sub = dart.progressStream.listen((p) {
-      debugPrint('[CleanArt] Dart progress: ${p.percentage} - ${p.stage}');
-      if (mounted) {
-        setState(() {
-          _progress = p.percentage;
-          _progressStage = '💻 ${p.stage}';
-        });
-      }
+      if (mounted) setState(() { _progress = p.percentage; _progressStage = p.stage; });
     });
-
     try {
       final result = await dart.processImage(
         image,
@@ -148,40 +118,25 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
           mode: ProcessingMode.local,
         ),
       );
-
-      debugPrint('[CleanArt] Dart processing succeeded. bytes=${result.processedImage.bytes.length}');
-
       if (mounted) {
-        setState(() {
-          _isProcessing = false;
-          _result = result.processedImage;
-          _usedServer = false;
-        });
+        setState(() { _isProcessing = false; _result = result.processedImage; _usedServer = false; });
         context.read<WorkflowBloc>().add(WorkflowImageCleaned(result.processedImage));
       }
     } on ImageProcessingException catch (e) {
-      debugPrint('[CleanArt] ImageProcessingException: ${e.message}');
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-          _errorMessage = e.message;
-        });
-      }
-    } catch (e, stack) {
-      debugPrint('[CleanArt] Unexpected error: $e\n$stack');
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-          _errorMessage = 'Erro ao processar imagem: $e';
-        });
-      }
+      if (mounted) setState(() { _isProcessing = false; _errorMessage = e.message; });
+    } catch (e) {
+      if (mounted) setState(() { _isProcessing = false; _errorMessage = 'Erro ao processar: $e'; });
     } finally {
       await sub.cancel();
       dart.dispose();
     }
   }
 
-  /// Skip cleaning — use the original image as-is.
+  Future<void> _refineImage(ImageData image, RefinementMode mode) async {
+    setState(() => _refinementMode = mode);
+    await _cleanArt(image);
+  }
+
   void _skipCleaning(ImageData image) {
     final processed = ProcessedImage(
       bytes: image.bytes,
@@ -205,95 +160,60 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
     context.go(AppRoutes.imageCapture);
   }
 
+  // ── Build ───────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<WorkflowBloc, WorkflowBlocState>(
       builder: (context, state) {
         final originalImage = state.capturedImage;
-
         if (originalImage == null) {
-          return const Scaffold(
-            body: Center(child: Text('Nenhuma imagem carregada.')),
-          );
+          return const Scaffold(body: Center(child: Text('Nenhuma imagem carregada.')));
         }
 
         return Scaffold(
           appBar: AppBar(
             title: const Text('Preparar Arte'),
-            actions: const [
-              ContextualHelpButton(step: WorkflowStep.imageCleaning),
-            ],
+            actions: const [ContextualHelpButton(step: WorkflowStep.imageCleaning)],
           ),
           body: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const _StepHeader(
-                  stepNumber: 2,
-                  title: 'Preparar a Arte',
-                  subtitle:
-                      'Ajuste a imagem antes de gerar o bordado. '
-                      'Esta etapa é opcional.',
-                ),
-
+                const _StepHeader(),
                 const SizedBox(height: 12),
 
-                // Server status indicator
                 _ServerStatusBadge(
                   available: _serverAvailable,
                   serverUrl: ServerConfig.url,
                   onConfigure: () => _showServerDialog(context),
                 ),
-
                 const SizedBox(height: 16),
 
-                // Image preview
-                if (_result != null) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _ImageCard(
-                          label: 'Original',
-                          bytes: originalImage.bytes,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _ImageCard(
-                          label: 'Resultado',
-                          bytes: _result!.bytes,
-                          highlight: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _SuccessBanner(
-                    colorCount: _result!.colorCount,
-                    usedServer: _usedServer,
-                  ),
-                ] else ...[
-                  _ImageCard(
-                    label: 'Imagem Original',
-                    bytes: originalImage.bytes,
-                  ),
+                // ── Image comparison ──────────────────────────────────────
+                _ImageComparison(
+                  original: originalImage.bytes,
+                  result: _result?.bytes,
+                ),
+                const SizedBox(height: 16),
+
+                // ── Dominant color palette (after processing) ─────────────
+                if (_result != null && _result!.dominantColors.isNotEmpty) ...[
+                  _PaletteRow(colors: _result!.dominantColors),
+                  const SizedBox(height: 16),
                 ],
 
-                const SizedBox(height: 20),
-
-                // Options
-                _OptionsCard(
+                // ── Options ───────────────────────────────────────────────
+                _OptionsPanel(
                   removeBackground: _removeBackground,
                   maxColors: _maxColors,
-                  onRemoveBackgroundChanged: (v) =>
-                      setState(() => _removeBackground = v),
+                  onRemoveBackgroundChanged: (v) => setState(() => _removeBackground = v),
                   onMaxColorsChanged: (v) => setState(() => _maxColors = v),
                 ),
-
                 const SizedBox(height: 16),
 
-                // Progress
+                // ── Progress ──────────────────────────────────────────────
                 if (_isProcessing) ...[
                   LinearProgressIndicator(
                     value: _progress,
@@ -311,26 +231,52 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
                   const SizedBox(height: 16),
                 ],
 
-                // Error
+                // ── Error ─────────────────────────────────────────────────
                 if (_errorMessage != null) ...[
                   _ErrorBanner(message: _errorMessage!),
                   const SizedBox(height: 16),
                 ],
 
-                // Buttons
+                // ── Success banner ────────────────────────────────────────
+                if (_result != null && !_isProcessing) ...[
+                  _SuccessBanner(colorCount: _result!.colorCount, usedServer: _usedServer),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Complexity badge ──────────────────────────────────────
+                if (_result?.complexity != null && !_isProcessing) ...[
+                  _ComplexityBadge(complexity: _result!.complexity!),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Refinement card (always shown after processing, not just medium/complex)
+                if (_result != null &&
+                    _refinementMode == RefinementMode.none &&
+                    !_isProcessing) ...[
+                  _RefinementCard(
+                    complexity: _result!.complexity,
+                    onRefineLight: () => _refineImage(originalImage, RefinementMode.light),
+                    onRefineAdvanced: () => _refineImage(originalImage, RefinementMode.advanced),
+                    onChangeImage: _goBack,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── Action buttons ────────────────────────────────────────
                 if (!_isProcessing) ...[
                   FilledButton.icon(
-                    onPressed: () => _cleanArt(originalImage),
+                    onPressed: () {
+                      setState(() => _refinementMode = RefinementMode.none);
+                      _cleanArt(originalImage);
+                    },
                     icon: const Icon(Icons.auto_fix_high),
-                    label: Text(
-                      _result != null ? 'Aplicar Novamente' : 'Aplicar Ajustes',
-                    ),
+                    label: Text(_result != null ? 'Aplicar Novamente' : 'Aplicar Ajustes'),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: () => _skipCleaning(originalImage),
                     icon: const Icon(Icons.skip_next),
-                    label: const Text('Pular esta etapa'),
+                    label: const Text('Usar imagem original (pular etapa)'),
                   ),
                 ],
               ],
@@ -358,10 +304,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'URL do servidor Python (api_server.py).\n'
-              'Padrão: http://localhost:8000',
-            ),
+            const Text('URL do servidor Python (api_server.py).\nPadrão: http://localhost:8000'),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -374,10 +317,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
           TextButton(
             onPressed: () async {
               await ServerConfig.reset();
@@ -402,15 +342,7 @@ class _ImageCleaningScreenState extends State<ImageCleaningScreen> {
 // ── Sub-widgets ──────────────────────────────────────────────────────────────
 
 class _StepHeader extends StatelessWidget {
-  const _StepHeader({
-    required this.stepNumber,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final int stepNumber;
-  final String title;
-  final String subtitle;
+  const _StepHeader();
 
   @override
   Widget build(BuildContext context) {
@@ -419,18 +351,377 @@ class _StepHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Passo $stepNumber de 5',
+          'Passo 2 de 5',
           style: theme.textTheme.labelMedium?.copyWith(
-            color: theme.colorScheme.primary,
-            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.primary, fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 4),
-        Text(title, style: theme.textTheme.headlineSmall),
+        Text('Preparar a Arte', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(
-          subtitle,
+          'Escolha se quer remover o fundo e quantas cores usar no bordado.',
           style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ImageComparison extends StatelessWidget {
+  const _ImageComparison({required this.original, required this.result});
+
+  final Uint8List original;
+  final Uint8List? result;
+
+  @override
+  Widget build(BuildContext context) {
+    if (result == null) {
+      return _ImageCard(label: 'Imagem Original', bytes: original);
+    }
+    return Row(
+      children: [
+        Expanded(child: _ImageCard(label: 'Original', bytes: original)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _ImageCard(label: 'Resultado', bytes: result!, highlight: true),
+        ),
+      ],
+    );
+  }
+}
+
+class _ImageCard extends StatelessWidget {
+  const _ImageCard({required this.label, required this.bytes, this.highlight = false});
+
+  final String label;
+  final Uint8List bytes;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: highlight ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+            fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          height: 160,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: highlight ? theme.colorScheme.primary : theme.colorScheme.outlineVariant,
+              width: highlight ? 2 : 1,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(7),
+            // Checkered background shows transparency
+            child: Stack(
+              children: [
+                _CheckeredBackground(),
+                Positioned.fill(child: Image.memory(bytes, fit: BoxFit.contain)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Checkered pattern to visualize transparent areas in processed images.
+class _CheckeredBackground extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _CheckerPainter(), child: const SizedBox.expand());
+  }
+}
+
+class _CheckerPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const cellSize = 12.0;
+    final light = Paint()..color = Colors.white;
+    final dark = Paint()..color = const Color(0xFFDDDDDD);
+
+    int row = 0;
+    for (double y = 0; y < size.height; y += cellSize, row++) {
+      int col = 0;
+      for (double x = 0; x < size.width; x += cellSize, col++) {
+        canvas.drawRect(
+          Rect.fromLTWH(x, y, cellSize, cellSize),
+          (row + col) % 2 == 0 ? light : dark,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CheckerPainter _) => false;
+}
+
+/// Shows extracted dominant colors as swatches with their hex codes.
+class _PaletteRow extends StatelessWidget {
+  const _PaletteRow({required this.colors});
+
+  final List<int> colors; // ARGB ints
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Cores extraídas',
+          style: Theme.of(context)
+              .textTheme
+              .labelMedium
+              ?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: colors.take(16).map((argb) {
+            final hex =
+                '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+            return Tooltip(
+              message: hex,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Color(argb | 0xFF000000),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.black12),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _OptionsPanel extends StatelessWidget {
+  const _OptionsPanel({
+    required this.removeBackground,
+    required this.maxColors,
+    required this.onRemoveBackgroundChanged,
+    required this.onMaxColorsChanged,
+  });
+
+  final bool removeBackground;
+  final int maxColors;
+  final ValueChanged<bool> onRemoveBackgroundChanged;
+  final ValueChanged<int> onMaxColorsChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Opções de Ajuste',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+
+            // ── Background removal ──────────────────────────────────────
+            _BackgroundRemovalOption(
+              value: removeBackground,
+              onChanged: onRemoveBackgroundChanged,
+            ),
+
+            const Divider(height: 28),
+
+            // ── Color count ─────────────────────────────────────────────
+            _ColorCountOption(
+              value: maxColors,
+              onChanged: onMaxColorsChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackgroundRemovalOption extends StatelessWidget {
+  const _BackgroundRemovalOption({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Remover fundo?',
+                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(
+                    value
+                        ? 'O fundo será removido (transparente no resultado).'
+                        : 'O fundo será mantido na imagem.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(value: value, onChanged: onChanged),
+          ],
+        ),
+        if (value)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'A remoção detecta a cor mais comum nas bordas da imagem. '
+                      'Funciona melhor com fundos lisos (branco, cinza, cor única).',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ColorCountOption extends StatelessWidget {
+  const _ColorCountOption({required this.value, required this.onChanged});
+
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  static const _presets = [
+    (label: 'Simples', count: 4, hint: 'Menos detalhes, bordado rápido'),
+    (label: 'Normal', count: 8, hint: 'Balanceado — recomendado'),
+    (label: 'Detalhado', count: 16, hint: 'Mais cores, mais trocas de linha'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Número de cores',
+                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '$value cores',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Quick presets
+        Row(
+          children: _presets.map((p) {
+            final selected = value == p.count;
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Tooltip(
+                  message: p.hint,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: selected
+                          ? theme.colorScheme.primaryContainer
+                          : null,
+                      side: BorderSide(
+                        color: selected
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.outlineVariant,
+                        width: selected ? 2 : 1,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onPressed: () => onChanged(p.count),
+                    child: Text(
+                      p.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: selected
+                            ? theme.colorScheme.onPrimaryContainer
+                            : null,
+                        fontWeight: selected ? FontWeight.bold : null,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 8),
+
+        // Fine-grained slider
+        Slider(
+          value: value.toDouble(),
+          min: 2,
+          max: 16,
+          divisions: 14,
+          label: '$value',
+          onChanged: (v) => onChanged(v.round()),
+        ),
+        Text(
+          'Menos cores = troca de linha menos vezes. '
+          'Mais cores = resultado mais fiel à imagem.',
+          style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
@@ -456,9 +747,9 @@ class _ServerStatusBadge extends StatelessWidget {
 
     final (icon, color, label) = switch (available) {
       null => (Icons.sync, theme.colorScheme.onSurfaceVariant, 'Verificando servidor...'),
-      true => (Icons.cloud_done, Colors.green, 'Servidor conectado — processamento com IA'),
+      true => (Icons.cloud_done, Colors.green.shade700, 'Servidor conectado — IA ativa (rembg)'),
       false => (Icons.cloud_off, theme.colorScheme.onSurfaceVariant,
-          'Servidor offline — usando processamento local'),
+          'Servidor offline — processamento local'),
     };
 
     return InkWell(
@@ -473,124 +764,13 @@ class _ServerStatusBadge extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: color),
+            Icon(icon, size: 15, color: color),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                label,
-                style: theme.textTheme.bodySmall?.copyWith(color: color),
-              ),
+              child: Text(label,
+                  style: theme.textTheme.bodySmall?.copyWith(color: color)),
             ),
-            Icon(Icons.settings, size: 14,
-                color: theme.colorScheme.onSurfaceVariant),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _OptionsCard extends StatelessWidget {
-  const _OptionsCard({
-    required this.removeBackground,
-    required this.maxColors,
-    required this.onRemoveBackgroundChanged,
-    required this.onMaxColorsChanged,
-  });
-
-  final bool removeBackground;
-  final int maxColors;
-  final ValueChanged<bool> onRemoveBackgroundChanged;
-  final ValueChanged<int> onMaxColorsChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Opções de Ajuste',
-              style: theme.textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-
-            // Remove background toggle
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Remover fundo',
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w500),
-                      ),
-                      Text(
-                        'Remove a cor de fundo da imagem',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: removeBackground,
-                  onChanged: onRemoveBackgroundChanged,
-                ),
-              ],
-            ),
-
-            const Divider(height: 24),
-
-            // Color count slider
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Número de cores',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w500),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '$maxColors cores',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Slider(
-              value: maxColors.toDouble(),
-              min: 2,
-              max: 16,
-              divisions: 14,
-              label: '$maxColors',
-              onChanged: (v) => onMaxColorsChanged(v.round()),
-            ),
-            Text(
-              'Menos cores = bordado mais simples. '
-              'Mais cores = mais detalhes.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
+            Icon(Icons.settings, size: 14, color: theme.colorScheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -599,10 +779,7 @@ class _OptionsCard extends StatelessWidget {
 }
 
 class _SuccessBanner extends StatelessWidget {
-  const _SuccessBanner({
-    required this.colorCount,
-    required this.usedServer,
-  });
+  const _SuccessBanner({required this.colorCount, required this.usedServer});
 
   final int colorCount;
   final bool usedServer;
@@ -617,17 +794,223 @@ class _SuccessBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.check_circle,
-              color: Theme.of(context).colorScheme.primary),
+          Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Ajuste aplicado! $colorCount cores. '
-              '${usedServer ? "Processado pelo servidor (IA)." : "Processado localmente."}',
+              '${usedServer ? "Processado com IA (rembg)." : "Processado localmente."}',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ComplexityBadge extends StatelessWidget {
+  const _ComplexityBadge({required this.complexity});
+
+  final ImageComplexity complexity;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (color, bgColor, icon) = switch (complexity.level) {
+      ComplexityLevel.simple => (
+          Colors.green.shade700,
+          Colors.green.shade50,
+          Icons.check_circle_outline,
+        ),
+      ComplexityLevel.medium => (
+          Colors.orange.shade700,
+          Colors.orange.shade50,
+          Icons.warning_amber_outlined,
+        ),
+      ComplexityLevel.complex => (
+          Colors.red.shade700,
+          Colors.red.shade50,
+          Icons.error_outline,
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Complexidade: ${complexity.levelLabel}',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: color, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  complexity.recommendation,
+                  style: theme.textTheme.bodySmall?.copyWith(color: color),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '${complexity.score}',
+            style: theme.textTheme.titleMedium
+                ?.copyWith(color: color, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RefinementCard extends StatelessWidget {
+  const _RefinementCard({
+    required this.complexity,
+    required this.onRefineLight,
+    required this.onRefineAdvanced,
+    required this.onChangeImage,
+  });
+
+  final ImageComplexity? complexity;
+  final VoidCallback onRefineLight;
+  final VoidCallback onRefineAdvanced;
+  final VoidCallback onChangeImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isComplex = complexity?.level == ComplexityLevel.complex;
+
+    return Card(
+      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.tune, size: 15, color: theme.colorScheme.secondary),
+                const SizedBox(width: 8),
+                Text(
+                  'Deseja refinar a imagem?',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.secondary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Light refinement
+            _RefinementOption(
+              icon: Icons.brush_outlined,
+              label: RefinementMode.light.label,
+              hint: RefinementMode.light.hint,
+              onTap: onRefineLight,
+            ),
+            const SizedBox(height: 6),
+
+            // Advanced refinement
+            _RefinementOption(
+              icon: Icons.auto_fix_high,
+              label: RefinementMode.advanced.label,
+              hint: RefinementMode.advanced.hint,
+              onTap: onRefineAdvanced,
+              warning: isComplex
+                  ? 'Pode apagar traços finos. Use leve se a imagem tiver linhas.'
+                  : null,
+            ),
+
+            if (isComplex) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onChangeImage,
+                icon: const Icon(Icons.photo_library_outlined, size: 16),
+                label: const Text('Usar outra imagem'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RefinementOption extends StatelessWidget {
+  const _RefinementOption({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.onTap,
+    this.warning,
+  });
+
+  final IconData icon;
+  final String label;
+  final String hint;
+  final VoidCallback onTap;
+  final String? warning;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: theme.colorScheme.secondary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  Text(hint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                  if (warning != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        warning!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right,
+                size: 18, color: theme.colorScheme.onSurfaceVariant),
+          ],
+        ),
       ),
     );
   }
@@ -649,67 +1032,15 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline,
-              color: theme.colorScheme.onErrorContainer),
+          Icon(Icons.error_outline, color: theme.colorScheme.onErrorContainer),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              message,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onErrorContainer,
-              ),
-            ),
+            child: Text(message,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onErrorContainer)),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _ImageCard extends StatelessWidget {
-  const _ImageCard({
-    required this.label,
-    required this.bytes,
-    this.highlight = false,
-  });
-
-  final String label;
-  final Uint8List bytes;
-  final bool highlight;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: highlight
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurfaceVariant,
-            fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          height: 160,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: highlight
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outlineVariant,
-              width: highlight ? 2 : 1,
-            ),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.memory(bytes, fit: BoxFit.contain),
-          ),
-        ),
-      ],
     );
   }
 }

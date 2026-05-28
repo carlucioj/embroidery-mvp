@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -17,19 +18,32 @@ class ColorMapper {
   List<_ThreadEntry>? _isacordColors;
   List<_ThreadEntry>? _brotherColors;
   bool _loaded = false;
+  // Prevents parallel loads: concurrent callers await the same Future.
+  Completer<void>? _loadCompleter;
 
   /// Load color tables from assets. Must be called before [mapColors].
+  /// Safe to call concurrently — subsequent calls await the first load.
   Future<void> loadColorTables() async {
     if (_loaded) return;
+    if (_loadCompleter != null) return _loadCompleter!.future;
 
-    final madeiraJson = await rootBundle.loadString('assets/colors/madeira.json');
-    final isacordJson = await rootBundle.loadString('assets/colors/isacord.json');
-    final brotherJson = await rootBundle.loadString('assets/colors/brother.json');
+    _loadCompleter = Completer<void>();
+    try {
+      final madeiraJson = await rootBundle.loadString('assets/colors/madeira.json');
+      final isacordJson = await rootBundle.loadString('assets/colors/isacord.json');
+      final brotherJson = await rootBundle.loadString('assets/colors/brother.json');
 
-    _madeiraColors = _parseColorTable(madeiraJson);
-    _isacordColors = _parseColorTable(isacordJson);
-    _brotherColors = _parseColorTable(brotherJson);
-    _loaded = true;
+      _madeiraColors = _parseColorTable(madeiraJson);
+      _isacordColors = _parseColorTable(isacordJson);
+      _brotherColors = _parseColorTable(brotherJson);
+      _loaded = true;
+      _loadCompleter!.complete();
+    } catch (e, st) {
+      final c = _loadCompleter!;
+      _loadCompleter = null; // allow retry on next call
+      c.completeError(e, st);
+      rethrow;
+    }
   }
 
   /// Map a list of ARGB colors to the nearest thread colors.
