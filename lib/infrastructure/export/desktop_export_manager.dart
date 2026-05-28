@@ -25,7 +25,7 @@ class DesktopExportManager implements ExportManager {
     // path.extension returns ".pes", we need "pes" (no dot, lowercase).
     final ext = path.extension(suggestedFilename).replaceAll('.', '').toLowerCase();
 
-    final result = await FilePicker.platform.saveFile(
+    final result = await FilePicker.saveFile(
       dialogTitle: 'Salvar arquivo de bordado',
       fileName: suggestedFilename,
       allowedExtensions: ext.isNotEmpty ? [ext] : null,

@@ -65,7 +65,7 @@ class _ImageCaptureScreenState extends State<ImageCaptureScreen> {
     });
 
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: SupportedFormats.imageExtensions,
         withData: true,
