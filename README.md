@@ -129,15 +129,20 @@ pip install rembg opencv-python-headless pyembroidery Pillow numpy fastapi uvico
 
 ### 4. Iniciar o servidor Python
 
-**Windows (Desktop):**
+**Windows (Desktop) — obrigatório antes de abrir o app:**
 ```powershell
-python main.py
+# Dentro da pasta python/, com o venv ativado:
+python api_server.py
 ```
 
-Ou use o script de atalho:
+Ou use o atalho (duplo clique):
 ```
 INICIAR_SERVIDOR.bat
 ```
+
+> **Nota:** O app Flutter conecta em `http://localhost:8000`. Mantenha o servidor
+> rodando em segundo plano enquanto usa o app. Você saberá que está funcionando
+> quando ver `Uvicorn running on http://0.0.0.0:8000` no terminal.
 
 ### 5. Rodar o app
 
@@ -207,9 +212,10 @@ python/
 | 5 | Tipos de ponto editáveis (fill / outline / satin) | ✅ Feito |
 | 6 | Análise de complexidade + refinamento por escolha | ✅ Feito |
 | 7 | Exportação `.PES` validada contra specs Brother | ✅ Feito |
-| 8 | Geração via IA (Claude API) | 🔜 Em planejamento |
-| 9 | Vectorização automática via vtracer | 🔜 Em planejamento |
-| 10 | Detecção de USB para exportação automática | 🔜 Em planejamento |
+| 8 | Vectorização automática via vtracer | ✅ Feito |
+| 9 | Detecção de USB para exportação automática | ✅ Feito |
+| 10 | Pipeline completo para todos os 12 formatos | ✅ Feito |
+| 11 | Geração via IA (Claude API) | 🔜 Em planejamento |
 
 ---
 
