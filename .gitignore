@@ -72,3 +72,8 @@ build/
 # Test coverage
 coverage/
 lcov.info
+
+installer/dist/
+python/dist/
+python/build/
+python/dist_debug/
