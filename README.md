@@ -83,7 +83,7 @@ Antes de salvar, o app valida automaticamente o arquivo contra as especificaçõ
 
 | Plataforma | Status | Método de processamento |
 |------------|--------|------------------------|
-| **Windows Desktop** | ✅ Suportado | Python local via MethodChannel |
+| **Windows Desktop** | ✅ Suportado | Engine Python embutido (subprocess automático) |
 | **Android** | ✅ Suportado | HTTP REST API (servidor local ou nuvem) |
 | **iOS** | ✅ Suportado | HTTP REST API (servidor local ou nuvem) |
 
@@ -91,11 +91,13 @@ Antes de salvar, o app valida automaticamente o arquivo contra as especificaçõ
 
 ## Requisitos
 
-### Desktop (Windows) — recomendado
-- Windows 10 64-bit ou superior
+### Usuário Final (Windows) — instalador
+- Windows 10 64-bit (build 17763+) ou superior
 - 4 GB RAM (mínimo), 8 GB RAM (recomendado para rembg)
-- Flutter 3.16+
-- Python 3.11+
+- ~200 MB de espaço livre
+
+### Desenvolvedor — build from source
+- Flutter 3.16+, Python 3.11+, PyInstaller, Inno Setup 6
 
 ### Mobile
 - Android 8.0+ / iOS 13+
@@ -103,22 +105,28 @@ Antes de salvar, o app valida automaticamente o arquivo contra as especificaçõ
 
 ---
 
-## Instalação e Execução
+## Instalação
 
-### 1. Clonar o repositório
+### Modo fácil — instalador pré-compilado (recomendado)
+
+1. Baixe `EmbroideryMVP_Setup_0.1.0.exe` da página de releases
+2. Execute o instalador (não requer admin — instala em `%LOCALAPPDATA%`)
+3. Abra o app pelo atalho criado
+
+> **Primeira execução:** o modelo de IA U2Net (~170 MB) é baixado automaticamente
+> em `~\.u2net\` na primeira vez que você processar uma imagem.
+
+### Modo desenvolvedor — build from source
+
+#### 1. Clonar e instalar dependências Flutter
 
 ```bash
 git clone https://github.com/carlucioj/embroidery-mvp.git
 cd embroidery-mvp/embroidery_mvp
-```
-
-### 2. Instalar dependências Flutter
-
-```bash
 flutter pub get
 ```
 
-### 3. Configurar backend Python
+#### 2. Configurar backend Python
 
 ```powershell
 cd python
@@ -127,31 +135,34 @@ python -m venv .venv
 pip install rembg opencv-python-headless pyembroidery Pillow numpy fastapi uvicorn
 ```
 
-### 4. Iniciar o servidor Python
+#### 3. Rodar em modo desenvolvimento
 
-**Windows (Desktop) — obrigatório antes de abrir o app:**
+**Terminal 1 — servidor Python (obrigatório):**
 ```powershell
 # Dentro da pasta python/, com o venv ativado:
 python api_server.py
+# Ou: duplo clique em INICIAR_SERVIDOR.bat
 ```
 
-Ou use o atalho (duplo clique):
-```
-INICIAR_SERVIDOR.bat
-```
-
-> **Nota:** O app Flutter conecta em `http://localhost:8000`. Mantenha o servidor
-> rodando em segundo plano enquanto usa o app. Você saberá que está funcionando
-> quando ver `Uvicorn running on http://0.0.0.0:8000` no terminal.
-
-### 5. Rodar o app
-
+**Terminal 2 — app Flutter:**
 ```bash
-# Desktop
-flutter run -d windows
+flutter run -d windows   # Desktop
+flutter run -d android   # Mobile
+```
 
-# Android
-flutter run -d android
+#### 4. Gerar o instalador (opcional)
+
+```powershell
+# 1. Build Flutter
+flutter build windows --release
+
+# 2. Build engine Python
+cd python
+.\.venv\Scripts\python.exe -m PyInstaller embroidery_backend.spec -y
+
+# 3. Gerar Setup.exe
+iscc installer\setup.iss
+# → installer\dist\EmbroideryMVP_Setup_0.1.0.exe (≈ 96 MB)
 ```
 
 ---
@@ -189,13 +200,19 @@ lib/
 python/
 ├── image_processor.py        # rembg + K-means + análise de complexidade
 ├── embroidery_converter.py   # tatami fill + validação de saída
-├── api_server.py             # FastAPI REST (uso Mobile)
-├── method_channel_handler.py # Protocolo JSON via stdin/stdout (Desktop)
-└── main.py                   # Entry point
+├── api_server.py             # FastAPI REST (Desktop embutido + Mobile remoto)
+├── embroidery_backend.spec   # PyInstaller — empacota api_server.py → .exe
+└── main.py                   # Entry point MethodChannel (legado)
+```
+
+```
+installer/
+└── setup.iss                 # Inno Setup — gera EmbroideryMVP_Setup_X.Y.Z.exe
 ```
 
 **Comunicação Python:**
-- Desktop → MethodChannel (processo Python local, latência ~0ms)
+- Desktop (instalado) → subprocess `engine\embroidery_backend.exe` spawned pelo Flutter, HTTP loopback 127.0.0.1:8000
+- Desktop (dev) → `python api_server.py` rodando manualmente
 - Mobile → HTTP REST API (FastAPI, pode rodar em VPS)
 - Fallback → Dart puro (processamento simplificado sem rembg)
 
@@ -215,7 +232,8 @@ python/
 | 8 | Vectorização automática via vtracer | ✅ Feito |
 | 9 | Detecção de USB para exportação automática | ✅ Feito |
 | 10 | Pipeline completo para todos os 12 formatos | ✅ Feito |
-| 11 | Geração via IA (Claude API) | 🔜 Em planejamento |
+| 11 | Instalador Windows (.exe) com engine embutido | ✅ Feito |
+| 12 | Geração via IA (Claude API) | 🔜 Em planejamento |
 
 ---
 

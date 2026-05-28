@@ -14,21 +14,32 @@ Plataforma de edição de bordado estilo PE-DESIGN NEXT com IA, para Windows Des
 
 ## Como rodar
 
-### Flutter
+### Modo desenvolvimento (sem instalador)
 ```powershell
+# Terminal 1 — engine Python
+cd embroidery_mvp/python
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install rembg opencv-python-headless pyembroidery Pillow numpy fastapi uvicorn
+python api_server.py  # HTTP server em localhost:8000
+
+# Terminal 2 — Flutter
 cd embroidery_mvp
 flutter pub get
 flutter run -d windows
 ```
 
-### Python backend (obrigatório para processamento de qualidade)
+### Gerar instalador
 ```powershell
-cd embroidery_mvp/python
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install rembg opencv-python-headless pyembroidery Pillow numpy fastapi uvicorn
-python main.py  # modo MethodChannel (Desktop)
+# Requer: Inno Setup 6, Python venv configurado
+flutter build windows --release   # usar drive sem acento se username tiver ú/ã/etc.
+cd python && .\.venv\Scripts\python.exe -m PyInstaller embroidery_backend.spec -y
+iscc installer\setup.iss          # → installer\dist\EmbroideryMVP_Setup_0.1.0.exe
 ```
+
+> **Nota buildpath:** `flutter build windows` falha se o path contiver caracteres
+> não-ASCII (bug MSBuild). Workaround: `subst B: "C:\Users\<user>\bordado"` e
+> buildar em `B:\embroidery_mvp`.
 
 ### Testes
 ```powershell
@@ -52,7 +63,8 @@ lib/
 **Fluxo de estado:** Onboarding → ImageCapture → ImageCleaning → Parameters → Generation → Export
 
 **Comunicação Python:**
-- Desktop: MethodChannel (`lib/infrastructure/python/python_bridge.dart`)
+- Desktop (instalado): subprocess `engine\embroidery_backend.exe` spawned por `EngineLauncher` em localhost:8000
+- Desktop (dev): `python api_server.py` rodando manualmente
 - Mobile: HTTP REST API (`lib/infrastructure/http/processing_api_client.dart`)
 - Fallback: Dart puro (`lib/infrastructure/image/dart_image_processor.dart`)
 
@@ -104,4 +116,5 @@ Usados pelo `ColorMapper` para mapear cores ARGB para códigos de linha via dist
 7. ~~Persistência de sessão~~ — FEITO (sessão completa sobrevive reinicializações; PR #6)
 8. ~~Vectorização via vtracer~~ — FEITO (`_vectorize_outline()` em `embroidery_converter.py`; vtracer polygon mode → contornos suaves; fallback automático para cv2.findContours se não instalado)
 9. ~~Detecção de USB~~ — FEITO (`UsbDriveDetector` via PowerShell/WMI; `_UsbDrivesCard` na ExportScreen com polling 3s; cópia direta sem file picker)
-10. **Geração via IA (Claude API)** — próximo (text prompt → embroidery design; maior diferencial competitivo)
+10. ~~Instalador Windows~~ — FEITO (`installer/setup.iss`; `engine_launcher.dart`; PyInstaller spec; `EmbroideryMVP_Setup_0.1.0.exe` 96 MB)
+11. **Geração via IA (Claude API)** — próximo (text prompt → embroidery design; maior diferencial competitivo)

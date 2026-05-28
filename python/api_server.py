@@ -17,12 +17,26 @@ Rate limiting:
     Handled by slowapi (10 requests/minute per IP by default).
 
 Usage:
-    python api_server.py --host 0.0.0.0 --port 8000
+    python api_server.py --host 127.0.0.1 --port 8000
 """
+
+# ── Windowed-mode stream fix (must run before any import that logs) ───────────
+# When bundled with PyInstaller console=False, the runw.exe bootloader sets
+# sys.stdout and sys.stderr to None.  Uvicorn and logging both crash on None
+# streams.  Redirect to a log file so everything works silently in the tray.
+import os
+import sys
+
+if getattr(sys, "frozen", False) and sys.stdout is None:
+    _log_dir = os.path.join(os.path.expanduser("~"), ".embroidery_mvp")
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = open(os.path.join(_log_dir, "engine.log"), "a", encoding="utf-8", buffering=1)
+    sys.stdout = _log_file
+    sys.stderr = _log_file
 
 import base64
 import logging
-import os
+import os  # noqa: F811 (re-import after the guard above)
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -177,7 +191,7 @@ async def convert_embroidery(
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the API server."""
     uvicorn.run(app, host=host, port=port, log_level="info")
 
@@ -186,7 +200,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Embroidery MVP API Server")
-    parser.add_argument("--host", default="0.0.0.0")
+    # Default to loopback — never expose on the local network unless explicitly asked.
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 

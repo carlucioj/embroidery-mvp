@@ -58,6 +58,8 @@ env/
 *.egg-info/
 dist/
 *.spec
+# Mas o spec hand-maintained do PyInstaller deve ser rastreado
+!python/embroidery_backend.spec
 build/
 
 # IDE
@@ -70,3 +72,8 @@ build/
 # Test coverage
 coverage/
 lcov.info
+
+installer/dist/
+python/dist/
+python/build/
+python/dist_debug/
