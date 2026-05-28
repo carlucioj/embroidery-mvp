@@ -58,6 +58,8 @@ env/
 *.egg-info/
 dist/
 *.spec
+# Mas o spec hand-maintained do PyInstaller deve ser rastreado
+!python/embroidery_backend.spec
 build/
 
 # IDE

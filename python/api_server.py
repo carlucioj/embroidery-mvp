@@ -177,7 +177,7 @@ async def convert_embroidery(
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the API server."""
     uvicorn.run(app, host=host, port=port, log_level="info")
 
@@ -186,7 +186,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Embroidery MVP API Server")
-    parser.add_argument("--host", default="0.0.0.0")
+    # Default to loopback — never expose on the local network unless explicitly asked.
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
